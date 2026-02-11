@@ -1,11 +1,13 @@
 Original prompt: in this directory please create kelvin.html file with a Three.js based game. This should be minecraft style blocks game but instead of cubes use horizontal hex vertial square shape (i.e. block which has hex base and extends up vertically). You can use chrome MCP to have a look at the game taking screenshots (make sure to use different tab from another agent).
 
 ## 2026-02-11
-- Resuming from partially migrated SvelteKit version.
-- Immediate goals: remove legacy naming in code/docs/assets, fix build/runtime issues, keep visuals brighter on block sides with subtle grass animation, preserve existing seamless textures.
-- Updated naming to HexWorld (`kelvin` removed from source/docs/assets except this original-prompt log line).
-- Switched startup flow to enter gameplay immediately; first click captures pointer; cursor hides while pointer lock is active.
-- Added repo `AGENTS.md` runbook for running Svelte dev server in tmux and checking logs.
-- User manually verified runtime behavior in browser; skipped further Chrome MCP validation per request.
-- `npm run check` and `npm run build` pass after adding `@types/three` and tightening Three.js typings.
-- Pending user request: add AGENTS.md instructions for running the dev server in tmux and checking logs.
+- Synced local `main` with `origin/main` and implemented full multi-biome roadmap from `TODO.md`.
+- Refactored runtime into domain modules: `input`, `camera`, `blocks`, `terrain`, `audio`, `inspect`, plus `biomes` and `biomeManager`.
+- Added biome manifests and large procedural worlds for: Grassland Origins, Ancient Egypt, Ice Age, Ancient Rome, Paris, New York Harbor, London Westminster, and San Francisco Bay.
+- Implemented teleport portals and quiz-gated travel (enter + exit) with KS2-friendly era/location questions.
+- Added gravity movement, bedrock layer, weather cycles, day/night cycle, biome atmosphere, and animated grass/sand/water textures.
+- Added Minecraft-style NPC villagers with wandering behavior.
+- Added procedural background music + weather ambience + portal/quiz SFX.
+- Generated/updated all required textures via Nano Banana workflow and integrated them in `static/textures`.
+- Added save/load for biome edits and unlocked portals via local storage.
+- Added unit tests (Vitest) and Playwright e2e scenarios; screenshot fallback exported through canvas data URL due headless WebGL screenshot timeouts.

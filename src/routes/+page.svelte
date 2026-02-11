@@ -10,6 +10,14 @@
 	let crosshairEl: HTMLDivElement;
 	let hotbarEl: HTMLDivElement;
 	let hintEl: HTMLDivElement;
+	let eraBannerEl: HTMLDivElement;
+	let quizModalEl: HTMLDivElement;
+	let quizTitleEl: HTMLHeadingElement;
+	let quizQuestionEl: HTMLParagraphElement;
+	let quizChoicesEl: HTMLDivElement;
+	let quizFeedbackEl: HTMLParagraphElement;
+	let quizCancelEl: HTMLButtonElement;
+	let mobileControlsEl: HTMLDivElement;
 
 	onMount(() => {
 		const game = new HexWorldGame({
@@ -20,7 +28,15 @@
 			toast: toastEl,
 			crosshair: crosshairEl,
 			hotbar: hotbarEl,
-			hint: hintEl
+			hint: hintEl,
+			eraBanner: eraBannerEl,
+			quizModal: quizModalEl,
+			quizTitle: quizTitleEl,
+			quizQuestion: quizQuestionEl,
+			quizChoices: quizChoicesEl,
+			quizFeedback: quizFeedbackEl,
+			quizCancel: quizCancelEl,
+			mobileControls: mobileControlsEl
 		});
 
 		game.start();
@@ -38,44 +54,72 @@
 	<div id="overlay" bind:this={overlayEl}>
 		<div id="panel">
 			<div id="panelHeader">
-				<h1>HexWorld: Hex Blocks</h1>
-				<p class="sub">Build, break, and fly across a hex-prism voxel world</p>
+				<h1>HexWorld: Time Portals</h1>
+				<p class="sub">Explore huge biomes, answer quizzes, and rebuild landmarks</p>
 			</div>
 			<div id="panelBody">
 				<div id="kbd">
 					<div class="box">
 						<h2>Move</h2>
 						<ul>
-							<li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> strafe</li>
-							<li><kbd>Space</kbd> up, <kbd>Shift</kbd> down (creative fly)</li>
+							<li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> run</li>
+							<li><kbd>Space</kbd> jump with gravity</li>
 							<li><kbd>Mouse</kbd> look (pointer lock)</li>
+							<li><kbd>F</kbd> toggle fast movement</li>
 						</ul>
 					</div>
 					<div class="box">
-						<h2>Build</h2>
+						<h2>Build & Travel</h2>
 						<ul>
-							<li><kbd>LMB</kbd> remove block</li>
-							<li><kbd>RMB</kbd> place block</li>
-							<li><kbd>1</kbd>-<kbd>4</kbd> select material</li>
-							<li><kbd>R</kbd> regenerate world</li>
+							<li><kbd>LMB</kbd> remove block, <kbd>RMB</kbd> place</li>
+							<li><kbd>1-8</kbd> select material</li>
+							<li><kbd>E</kbd> use nearby portal (quiz required)</li>
+							<li><kbd>R</kbd> regenerate current biome</li>
 						</ul>
 					</div>
 				</div>
 				<div id="ctaRow">
 					<button id="cta" bind:this={ctaEl}>Click to Play</button>
 					<div id="hint" bind:this={hintEl}>
-						If imports fail via <code>file://</code>, run:
-						<code>npm run dev</code> and open <code>http://localhost:5173</code>.
+						Play on <code>http://localhost:5173</code>. Day/night and weather rotate automatically.
 					</div>
 				</div>
 			</div>
 		</div>
 	</div>
 
+	<div id="eraBanner" bind:this={eraBannerEl}></div>
 	<div id="hud" bind:this={hudEl}></div>
 	<div id="toast" bind:this={toastEl}></div>
 	<div id="crosshair" bind:this={crosshairEl}></div>
 	<div id="hotbar" bind:this={hotbarEl}></div>
+
+	<div id="quizModal" bind:this={quizModalEl}>
+		<div class="quiz-card">
+			<h2 bind:this={quizTitleEl}>Travel Quiz</h2>
+			<p class="quiz-question" bind:this={quizQuestionEl}></p>
+			<div class="quiz-choices" bind:this={quizChoicesEl}></div>
+			<p class="quiz-feedback" bind:this={quizFeedbackEl}></p>
+			<div class="quiz-actions">
+				<button class="quiz-cancel" bind:this={quizCancelEl}>Cancel</button>
+			</div>
+		</div>
+	</div>
+
+	<div id="mobileControls" bind:this={mobileControlsEl}>
+		<div class="pad-row">
+			<button data-move="forward">W</button>
+		</div>
+		<div class="pad-row">
+			<button data-move="left">A</button>
+			<button data-move="backward">S</button>
+			<button data-move="right">D</button>
+		</div>
+		<div class="pad-row right">
+			<button data-move="jump">Jump</button>
+			<button data-action="interact">Portal</button>
+		</div>
+	</div>
 </div>
 
 <style>
@@ -128,7 +172,7 @@
 	}
 
 	#panel {
-		width: min(820px, 96vw);
+		width: min(860px, 96vw);
 		border-radius: 18px;
 		border: 1px solid rgba(255, 255, 255, 0.12);
 		background: linear-gradient(180deg, rgba(10, 14, 24, 0.9), rgba(10, 14, 24, 0.65));
@@ -237,6 +281,23 @@
 		color: var(--ink-dim);
 	}
 
+	#eraBanner {
+		position: absolute;
+		top: 10px;
+		left: 50%;
+		transform: translateX(-50%);
+		padding: 7px 12px;
+		border-radius: 999px;
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		background: rgba(9, 15, 31, 0.66);
+		font-weight: 700;
+		font-size: 12px;
+		letter-spacing: 0.3px;
+		display: none;
+		z-index: 7;
+		pointer-events: none;
+	}
+
 	#hud {
 		position: absolute;
 		left: 14px;
@@ -244,7 +305,7 @@
 		padding: 10px 12px;
 		border-radius: 12px;
 		border: 1px solid rgba(255, 255, 255, 0.1);
-		background: rgba(10, 14, 24, 0.45);
+		background: rgba(10, 14, 24, 0.5);
 		font:
 			12px ui-monospace,
 			SFMono-Regular,
@@ -258,7 +319,8 @@
 		user-select: none;
 		pointer-events: none;
 		display: none;
-		min-width: 250px;
+		min-width: 320px;
+		z-index: 5;
 	}
 
 	#hud :global(.row) {
@@ -270,10 +332,6 @@
 
 	#hud :global(.label) {
 		color: rgba(240, 246, 255, 0.66);
-	}
-
-	#hud :global(.warn) {
-		color: var(--danger);
 	}
 
 	#hotbar {
@@ -289,6 +347,7 @@
 		background: rgba(10, 14, 24, 0.5);
 		user-select: none;
 		pointer-events: none;
+		z-index: 6;
 	}
 
 	#hotbar :global(.slot) {
@@ -343,6 +402,7 @@
 		margin-top: -9px;
 		pointer-events: none;
 		display: none;
+		z-index: 6;
 	}
 
 	#crosshair::before,
@@ -370,7 +430,7 @@
 	#toast {
 		position: absolute;
 		left: 50%;
-		top: 16px;
+		top: 42px;
 		transform: translateX(-50%);
 		padding: 8px 12px;
 		border-radius: 999px;
@@ -382,6 +442,113 @@
 		letter-spacing: 0.1px;
 		display: none;
 		pointer-events: none;
+		z-index: 8;
+	}
+
+	#quizModal {
+		position: absolute;
+		inset: 0;
+		display: none;
+		place-items: center;
+		background: rgba(4, 9, 20, 0.7);
+		backdrop-filter: blur(6px);
+		z-index: 9;
+	}
+
+	.quiz-card {
+		width: min(640px, 94vw);
+		padding: 16px;
+		border-radius: 16px;
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		background: linear-gradient(180deg, rgba(12, 18, 34, 0.96), rgba(10, 16, 30, 0.88));
+	}
+
+	.quiz-card h2 {
+		margin: 0 0 10px;
+		font-size: 18px;
+	}
+
+	.quiz-question {
+		margin: 0 0 12px;
+		font-size: 15px;
+		line-height: 1.35;
+	}
+
+	.quiz-choices {
+		display: grid;
+		gap: 8px;
+	}
+
+	.quiz-choices :global(.quiz-option) {
+		text-align: left;
+		padding: 10px 12px;
+		border-radius: 10px;
+		border: 1px solid rgba(255, 255, 255, 0.2);
+		background: rgba(255, 255, 255, 0.06);
+		color: white;
+		cursor: pointer;
+	}
+
+	.quiz-choices :global(.quiz-option:hover) {
+		background: rgba(255, 255, 255, 0.11);
+	}
+
+	.quiz-feedback {
+		min-height: 22px;
+		margin: 10px 0 0;
+		font-weight: 600;
+	}
+
+	:global(#quizModal .quiz-feedback[data-ok='1']) {
+		color: #9ff9c7;
+	}
+
+	:global(#quizModal .quiz-feedback[data-ok='0']) {
+		color: #ffd1d7;
+	}
+
+	.quiz-actions {
+		display: flex;
+		justify-content: flex-end;
+		margin-top: 10px;
+	}
+
+	.quiz-cancel {
+		border: 1px solid rgba(255, 255, 255, 0.22);
+		background: rgba(255, 255, 255, 0.06);
+		color: white;
+		border-radius: 10px;
+		padding: 8px 10px;
+	}
+
+	#mobileControls {
+		position: absolute;
+		bottom: 84px;
+		left: 10px;
+		display: none;
+		gap: 4px;
+		z-index: 7;
+		user-select: none;
+	}
+
+	.pad-row {
+		display: flex;
+		gap: 4px;
+		justify-content: flex-start;
+	}
+
+	.pad-row.right {
+		justify-content: flex-end;
+	}
+
+	#mobileControls button {
+		min-width: 54px;
+		height: 44px;
+		border: 1px solid rgba(255, 255, 255, 0.22);
+		border-radius: 10px;
+		background: rgba(7, 14, 28, 0.66);
+		color: #f1f7ff;
+		font-weight: 700;
 	}
 
 	@media (max-width: 760px) {
@@ -394,6 +561,10 @@
 		#ctaRow {
 			flex-direction: column;
 			align-items: flex-start;
+		}
+		#hud {
+			min-width: 260px;
+			max-width: 92vw;
 		}
 	}
 </style>

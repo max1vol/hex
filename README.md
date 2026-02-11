@@ -1,29 +1,30 @@
 # HexWorld
 
-HexWorld is a 3D sandbox block game built with Three.js, SvelteKit, and TypeScript.
+HexWorld is a 3D hex-prism sandbox adventure built with Three.js, SvelteKit, and TypeScript.
 
-You explore and build on a world made of vertical hex-prism blocks (hex base, vertical sides), inspired by voxel builders but with hex terrain logic.
+You travel between large educational biomes (historical eras and places) through quiz-gated teleport portals, while building and repairing landmark-rich worlds.
 
 ![HexWorld in-game screenshot](./docs/images/hexworld-ingame.png)
 
 ## Gameplay
 
-- World: procedural hex terrain with grass, dirt, stone, and sand blocks.
-- Build loop: destroy with `LMB`, place with `RMB`, switch materials with `1-4`.
-- Movement: `WASD`, fly up with `Space`, fly down with `Shift`.
-- Camera: click the canvas to capture the mouse and control look; `Esc` unlocks/open menu.
-- Audio: procedural place/break sounds, toggle mute with `M`.
-- Utility: `R` regenerates world, `F` toggles fast movement.
+- World style: Minecraft-like sandbox loop, but using vertical hex-prism blocks.
+- Building: `LMB` remove, `RMB` place, `1-8` select material.
+- Movement: `WASD` move, `Space` jump (gravity enabled), `F` toggle fast mode.
+- Travel: approach a portal and press `E`, then answer a KS2-friendly quiz to enter/exit biomes.
+- Systems: day/night cycle, weather changes, animated nature textures, bedrock floor, ambient biome music, and procedural SFX.
+- NPCs: blocky wandering villagers in biome hubs.
 
-## Project Vision
+## Biomes
 
-HexWorld is planned as a multi-biome educational exploration game.
-
-Each biome will represent either:
-- major natural eras/locations (for example Ice Age environments), or
-- iconic human civilization sites (for example pyramid-era Egypt, Roman Colosseum, Eiffel Tower, Statue of Liberty).
-
-Biomes are connected by portals so the player travels through a single connected world of time/place experiences.
+- Grassland Origins
+- Ancient Egypt
+- Ice Age Tundra
+- Ancient Rome
+- Paris Industrial Age
+- New York Harbor
+- London Westminster (Parliament + Big Ben)
+- San Francisco Bay (Golden Gate Bridge + street-art streets)
 
 ## Development
 
@@ -32,11 +33,13 @@ npm install
 npm run dev
 ```
 
-Then open [http://localhost:5173](http://localhost:5173).
+Open [http://localhost:5173](http://localhost:5173).
 
-### Quality checks
+## Checks and tests
 
 ```bash
 npm run check
 npm run build
+npm run test:unit
+npm run test:e2e
 ```

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BLOCK_H, MAX_Y } from './constants';
+import { BLOCK_H, MAX_Y, SOLID_BLOCKS } from './constants';
 import { axialToWorld } from './hex';
 import type { BlockMaterialMap, BlockType, BlockUserData } from './types';
 
@@ -7,6 +7,7 @@ export type BlockMesh = THREE.Mesh<THREE.CylinderGeometry, THREE.Material | THRE
 
 export class World {
 	readonly blocks = new Map<string, BlockMesh>();
+	private readonly columnData = new Map<string, Map<number, BlockType>>();
 
 	constructor(
 		private readonly group: THREE.Group,
@@ -18,12 +19,46 @@ export class World {
 		return `${q},${r},${y}`;
 	}
 
+	columnKey(q: number, r: number): string {
+		return `${q},${r}`;
+	}
+
 	has(q: number, r: number, y: number): boolean {
 		return this.blocks.has(this.key(q, r, y));
 	}
 
 	get(q: number, r: number, y: number): BlockMesh | null {
 		return this.blocks.get(this.key(q, r, y)) ?? null;
+	}
+
+	getType(q: number, r: number, y: number): BlockType | null {
+		const mesh = this.get(q, r, y);
+		if (!mesh) return null;
+		const ud = mesh.userData as BlockUserData;
+		return ud.typeKey;
+	}
+
+	getTopAnyY(q: number, r: number): number {
+		const col = this.columnData.get(this.columnKey(q, r));
+		if (!col || col.size === 0) return -1;
+		let top = -1;
+		for (const y of col.keys()) top = Math.max(top, y);
+		return top;
+	}
+
+	getTopSolidY(q: number, r: number): number {
+		const col = this.columnData.get(this.columnKey(q, r));
+		if (!col || col.size === 0) return -1;
+		let top = -1;
+		for (const [y, type] of col.entries()) {
+			if (!SOLID_BLOCKS.has(type)) continue;
+			top = Math.max(top, y);
+		}
+		return top;
+	}
+
+	getGroundY(q: number, r: number): number {
+		return this.getTopSolidY(q, r) + BLOCK_H;
 	}
 
 	add(q: number, r: number, y: number, typeKey: BlockType): boolean {
@@ -39,6 +74,12 @@ export class World {
 
 		this.group.add(mesh);
 		this.blocks.set(k, mesh);
+
+		const ck = this.columnKey(q, r);
+		const col = this.columnData.get(ck) ?? new Map<number, BlockType>();
+		col.set(y, typeKey);
+		this.columnData.set(ck, col);
+
 		return true;
 	}
 
@@ -46,8 +87,16 @@ export class World {
 		const k = this.key(q, r, y);
 		const mesh = this.blocks.get(k);
 		if (!mesh) return false;
+
 		this.group.remove(mesh);
 		this.blocks.delete(k);
+
+		const ck = this.columnKey(q, r);
+		const col = this.columnData.get(ck);
+		if (col) {
+			col.delete(y);
+			if (!col.size) this.columnData.delete(ck);
+		}
 		return true;
 	}
 
@@ -56,5 +105,6 @@ export class World {
 			this.group.remove(mesh);
 		}
 		this.blocks.clear();
+		this.columnData.clear();
 	}
 }

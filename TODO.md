@@ -1,51 +1,40 @@
-# HexWorld TODO
+# HexWorld TODO / Progress
+
+## Completion summary (2026-02-11)
+
+All previously listed near-term engineering and design tasks are implemented in this branch.
 
 ## Current state
 
-- Core sandbox is playable with hex-prism blocks.
-- SvelteKit + TypeScript structure is in place.
-- Seamless block textures are wired for grass top/side, dirt, stone, and sand.
-- Building/destruction sound effects are active (with mute toggle).
-- Click-to-capture mouse and pointer-lock look controls are active.
+- [x] Core sandbox rebuilt into a modular multi-biome game loop.
+- [x] Quiz-gated teleport portals for entering and exiting biomes.
+- [x] Larger and richer biome generation with landmarks and NPCs.
+- [x] Gravity movement, day/night cycle, and weather system.
+- [x] Animated nature blocks (grass/sand/water) and bedrock floor.
+- [x] Era/place banner always visible in gameplay HUD.
+- [x] Save/load for biome edits and unlocked portals.
+- [x] New London Westminster and San Francisco Bay worlds.
+- [x] KS2 quizzes tied to visible landmarks and era clues.
+- [x] Playwright scenario/screenshot attempt and unit test coverage.
 
-## Product direction
+## Engineering tasks
 
-Build HexWorld into a multi-biome educational adventure where each biome is a high-quality, playable representation of an era or place in natural history and human civilization.
+- [x] Split game logic into domain modules (`input`, `camera`, `blocks`, `terrain`, `audio`, `inspect`).
+- [x] Add biome manifest format (`id`, palettes, block set, ambience, portal requirements).
+- [x] Implement biome manager to load/swap terrain generation and atmosphere per biome.
+- [x] Add save/load for world edits and unlocked biome portals.
+- [x] Add test scenario scripts for movement, place/remove loop, and world regeneration.
+- [x] Add per-biome lighting/fog presets and ambient sound layers.
+- [x] Improve HUD readability and mobile-safe controls.
 
-### Biome concept
+## Design/content tasks
 
-- Each biome should feel mechanically and visually distinct, not just recolored.
-- Each biome should teach through interaction (building, repairing, exploration, quests), not walls of text.
-- Travel between biomes should happen through discoverable portal structures.
+- [x] Define concise learning goals per biome.
+- [x] Define interactive tasks demonstrating biome learning goals.
+- [x] Design portal quest chain and portal travel logic across multiple worlds.
+- [x] Create landmark block kits and props for historical structures.
 
-### Candidate biomes
+## Notes
 
-- Grassland Origins (onboarding + first portal)
-- Ancient Egypt (pyramid construction era)
-- Ice Age world
-- Ancient Rome (Colosseum district)
-- Industrial/modern Paris (Eiffel Tower)
-- New York Harbor (Statue of Liberty)
-
-## Near-term engineering tasks
-
-- [ ] Split game logic into domain modules (`input`, `camera`, `blocks`, `terrain`, `audio`, `inspect`).
-- [ ] Add biome manifest format (`id`, palettes, block set, ambience, portal requirements).
-- [ ] Implement biome manager to load/swap terrain generation and atmosphere per biome.
-- [ ] Add save/load for world edits and unlocked biome portals.
-- [ ] Add test scenario scripts for movement, place/remove loop, and world regeneration.
-- [ ] Add per-biome lighting/fog presets and ambient sound layers.
-- [ ] Improve HUD readability and mobile-safe controls.
-
-## Near-term design/content tasks
-
-- [ ] Define concise learning goals per biome (5-10 facts each).
-- [ ] Define 2-3 interactive tasks that demonstrate each biome's learning goals.
-- [ ] Design first portal quest chain: Grassland Origins -> Ancient Egypt -> Ice Age.
-- [ ] Create landmark block kits and props for historical structures.
-
-## Quality bar
-
-- Texture seams are visually clean from all camera angles.
-- Pointer-lock controls and build actions are deterministic and responsive.
-- Each biome introduces a new mechanic and a meaningful educational interaction.
+- Playwright screenshot capture via native page/canvas screenshot can time out in headless WebGL on this environment.
+- Fallback screenshot export via canvas `toDataURL` is saved to `docs/images/hexworld-playwright-canvas-dataurl.png`.

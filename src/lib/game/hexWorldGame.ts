@@ -3,25 +3,34 @@ import {
 	BLOCK_H,
 	EPS,
 	HEX_RADIUS,
-	LOOK_SENS,
 	MAX_Y,
 	PALETTE,
+	PLAYER_MOVE_SPEED,
 	STEP_ACROSS_SIDE,
-	WORLD_RADIUS
+	WORLD_MIN_RADIUS
 } from './constants';
 import { HexWorldAudio } from './audio';
-import { axialToWorld, fbm, hash2, hexDist, worldToAxial } from './hex';
-import { loadTexture } from './texture';
+import { createBlockMaterials, loadBlockTextures, updateNatureTextureAnimation } from './blocks';
+import { BiomeManager } from './biomeManager';
+import { axialToWorld, worldToAxial } from './hex';
+import { InputController } from './input';
+import { normalizeInspectBlockType, readInspectConfig, readUrlParams } from './inspect';
 import type {
 	BlockMaterialMap,
 	BlockType,
 	BlockUserData,
 	GameStatePayload,
+	HexWorldElements,
 	InspectConfig,
-	HexWorldElements
+	NpcInstance,
+	PortalInstance,
+	QuizQuestion,
+	WeatherKind,
+	BiomeManifest
 } from './types';
-import { buildHotbar, updateHotbar } from './ui';
+import { buildHotbar, setHudRows, updateHotbar } from './ui';
 import { World, type BlockMesh } from './world';
+import { FirstPersonCameraController } from './camera';
 
 interface PickHit extends THREE.Intersection<THREE.Object3D<THREE.Object3DEventMap>> {
 	object: BlockMesh;
@@ -35,39 +44,28 @@ interface NeighborCell {
 	y: number;
 }
 
-interface TextureRefs {
-	grassTop: THREE.Texture | null;
-	grassSide: THREE.Texture | null;
-}
-
-interface KeyState {
-	w: boolean;
-	a: boolean;
-	s: boolean;
-	d: boolean;
-	space: boolean;
-	shift: boolean;
-}
-
 interface DisposeBag {
 	dispose(): void;
 }
 
-const TEXTURE_PATHS = {
-	grass_top: '/textures/grass_top.png',
-	grass_side: '/textures/grass_side.png',
-	dirt: '/textures/dirt.png',
-	stone: '/textures/stone.png',
-	sand: '/textures/sand.png'
-} as const;
+const WEATHER_LABEL: Record<WeatherKind, string> = {
+	clear: 'Clear',
+	rain: 'Rain',
+	snow: 'Snow',
+	mist: 'Mist'
+};
+
+const FORBIDDEN_BREAK_BLOCKS = new Set<BlockType>(['bedrock']);
 
 export class HexWorldGame implements DisposeBag {
 	private readonly scene: THREE.Scene;
 	private readonly renderer: THREE.WebGLRenderer;
 	private readonly camera: THREE.PerspectiveCamera;
-	private readonly yawObject = new THREE.Object3D();
-	private readonly pitchObject = new THREE.Object3D();
+	private readonly cameraCtrl: FirstPersonCameraController;
+
 	private readonly blockGroup = new THREE.Group();
+	private readonly portalGroup = new THREE.Group();
+	private readonly npcGroup = new THREE.Group();
 	private readonly raycaster = new THREE.Raycaster();
 	private readonly rayCenter = new THREE.Vector2(0, 0);
 	private readonly tmpMat3 = new THREE.Matrix3();
@@ -77,26 +75,32 @@ export class HexWorldGame implements DisposeBag {
 	private readonly mats: BlockMaterialMap;
 	private readonly world: World;
 	private readonly audio = new HexWorldAudio();
-	private readonly texRefs: TextureRefs = { grassTop: null, grassSide: null };
+	private readonly input = new InputController();
+	private readonly biomeManager = new BiomeManager();
 
 	private readonly highlight: BlockMesh;
 	private readonly inspect: InspectConfig;
 	private readonly urlParams: URLSearchParams;
 
-	private readonly keys: KeyState = {
-		w: false,
-		a: false,
-		s: false,
-		d: false,
-		space: false,
-		shift: false
-	};
+	private readonly hemiLight: THREE.HemisphereLight;
+	private readonly sunLight: THREE.DirectionalLight;
+	private readonly fillLight: THREE.DirectionalLight;
+
+	private weatherParticles: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
+	private weatherVelocity = new Float32Array(0);
+
+	private portals: PortalInstance[] = [];
+	private npcs: NpcInstance[] = [];
+	private currentBiome: BiomeManifest | null = null;
+	private currentWeather: WeatherKind = 'clear';
+	private portalHint = '';
 
 	private selectedPaletteIdx = 0;
 	private menuOpen = false;
 	private pointerLocked = false;
-	private speed = 8.5;
 	private fast = false;
+	private quizOpen = false;
+	private bootstrapDone = false;
 	private lastToastAt = 0;
 	private inspectAngle = 0;
 	private disposed = false;
@@ -105,17 +109,22 @@ export class HexWorldGame implements DisposeBag {
 	private fps = 0;
 	private lastFpsT = performance.now();
 	private lastT = performance.now();
+	private dayProgress = 0.18;
+	private nextWeatherSwitchAtMs = 0;
+
+	private activeQuizQuestion: QuizQuestion | null = null;
+	private activeQuizPortal: PortalInstance | null = null;
 
 	private readonly handlers: Array<() => void> = [];
 
 	constructor(private readonly el: HexWorldElements) {
-		this.urlParams = this.readUrlParams();
-		this.inspect = this.readInspectConfig(this.urlParams);
+		this.urlParams = readUrlParams();
+		this.inspect = readInspectConfig(this.urlParams);
 		this.inspectAngle = this.inspect.angle0;
 
 		this.scene = new THREE.Scene();
 		this.scene.background = new THREE.Color(0x97b6d3);
-		this.scene.fog = new THREE.FogExp2(0x9db6d2, 0.03);
+		this.scene.fog = new THREE.FogExp2(0x9db6d2, 0.02);
 
 		this.renderer = new THREE.WebGLRenderer({
 			canvas: this.el.canvas,
@@ -125,31 +134,26 @@ export class HexWorldGame implements DisposeBag {
 		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 		this.renderer.setSize(window.innerWidth, window.innerHeight, false);
 		this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+		this.renderer.shadowMap.enabled = false;
 
-		this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
-		this.pitchObject.add(this.camera);
-		this.yawObject.add(this.pitchObject);
-		this.scene.add(this.yawObject);
+		this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 900);
+		this.cameraCtrl = new FirstPersonCameraController(this.camera);
+		this.scene.add(this.cameraCtrl.yawObject);
 
-		this.initLights();
-		this.scene.add(this.blockGroup);
+		this.hemiLight = new THREE.HemisphereLight(0xe6f0ff, 0x95a6bf, 1.1);
+		this.scene.add(this.hemiLight);
+		this.sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
+		this.sunLight.position.set(20, 32, 12);
+		this.scene.add(this.sunLight);
+		this.fillLight = new THREE.DirectionalLight(0xd8e8ff, 0.7);
+		this.fillLight.position.set(-16, 18, -20);
+		this.scene.add(this.fillLight);
+
+		this.scene.add(this.blockGroup, this.portalGroup, this.npcGroup);
 
 		this.geoBlock = new THREE.CylinderGeometry(HEX_RADIUS, HEX_RADIUS, BLOCK_H, 6, 1, false);
 		this.geoBlock.rotateY(Math.PI / 6);
-
-		const matDirt = new THREE.MeshStandardMaterial({ color: 0x7a5c3a, roughness: 0.98, metalness: 0 });
-		const matGrassTop = new THREE.MeshStandardMaterial({ color: 0x3aa35b, roughness: 0.92, metalness: 0 });
-		const matGrassSide = new THREE.MeshStandardMaterial({ color: 0x6e5a3f, roughness: 0.95, metalness: 0 });
-		const matStone = new THREE.MeshStandardMaterial({ color: 0x8c9098, roughness: 0.92, metalness: 0 });
-		const matSand = new THREE.MeshStandardMaterial({ color: 0xe8d9a6, roughness: 0.95, metalness: 0 });
-
-		this.mats = {
-			grass: [matGrassSide, matGrassTop, matDirt],
-			dirt: [matDirt, matDirt, matDirt],
-			stone: [matStone, matStone, matStone],
-			sand: [matSand, matSand, matSand]
-		};
-
+		this.mats = createBlockMaterials();
 		this.world = new World(this.blockGroup, this.geoBlock, this.mats);
 
 		const highlightMat = new THREE.MeshBasicMaterial({
@@ -168,16 +172,7 @@ export class HexWorldGame implements DisposeBag {
 
 		this.installGlobalHooks();
 		this.bindEvents();
-		this.loadTextures();
-
-		if (this.inspect.enabled) {
-			this.setupInspect();
-			this.enterInspectUiMode();
-		} else {
-			this.generateWorld();
-			this.setMenu(false);
-			this.showToast('Click to capture mouse. LMB remove, RMB place. 1-4 selects.', 3200);
-		}
+		void this.bootstrap();
 	}
 
 	start(): void {
@@ -193,45 +188,35 @@ export class HexWorldGame implements DisposeBag {
 		delete window.render_game_to_text;
 		delete window.advanceTime;
 		delete window.hexworld_set_inspect_angle;
+		delete window.hexworld_debug_action;
 
 		this.world.clear();
 		this.renderer.dispose();
 		this.geoBlock.dispose();
 	}
 
-	private initLights(): void {
-		const hemi = new THREE.HemisphereLight(0xe6f0ff, 0x95a6bf, 1.18);
-		this.scene.add(hemi);
-
-		const sun = new THREE.DirectionalLight(0xffffff, 0.95);
-		sun.position.set(18, 30, 10);
-		this.scene.add(sun);
-
-		const fill = new THREE.DirectionalLight(0xd8e8ff, 0.88);
-		fill.position.set(-16, 18, -20);
-		this.scene.add(fill);
-	}
-
-	private readUrlParams(): URLSearchParams {
-		let params: URLSearchParams;
+	private async bootstrap(): Promise<void> {
 		try {
-			params = new URLSearchParams(window.location.search);
-		} catch {
-			params = new URLSearchParams();
+			await loadBlockTextures(this.renderer, this.mats);
+		} catch (err) {
+			console.warn('Texture load failed:', err);
+			this.showToast('Some textures failed to load.', 2800);
 		}
-		return params;
-	}
 
-	private readInspectConfig(params: URLSearchParams): InspectConfig {
-		return {
-			enabled: params.get('inspect') === '1',
-			type: (params.get('type') || 'grass').toLowerCase(),
-			angle0: Number.parseFloat(params.get('angle') || '0') || 0,
-			spin: params.get('spin') === '1',
-			ui: params.get('ui') === '1',
-			distance: Number.parseFloat(params.get('dist') || '4.8') || 4.8,
-			height: Number.parseFloat(params.get('height') || '2.4') || 2.4
-		};
+		if (this.inspect.enabled) {
+			this.setupInspect();
+			this.enterInspectUiMode();
+			this.bootstrapDone = true;
+			return;
+		}
+
+		let initialBiomeId = this.biomeManager.loadSave();
+		if (!initialBiomeId) initialBiomeId = 'grassland-origins';
+		this.loadBiome(initialBiomeId, false);
+
+		this.setMenu(false);
+		this.bootstrapDone = true;
+		this.showToast('Click to capture mouse. E near a portal to travel.', 3600);
 	}
 
 	private installGlobalHooks(): void {
@@ -242,16 +227,29 @@ export class HexWorldGame implements DisposeBag {
 		};
 
 		window.render_game_to_text = () => {
+			const ax = this.currentAxialUnderPlayer();
 			const payload: GameStatePayload = {
-				mode: this.inspect.enabled ? 'inspect' : this.menuOpen ? 'menu' : 'play',
+				mode: this.inspect.enabled ? 'inspect' : this.quizOpen ? 'quiz' : this.menuOpen ? 'menu' : 'play',
 				muted: this.audio.isMuted(),
 				selected: PALETTE[this.selectedPaletteIdx]?.key ?? null,
-				blocks: this.world.blocks.size
+				blocks: this.world.blocks.size,
+				biomeId: this.currentBiome?.id,
+				weather: this.currentWeather,
+				timeOfDay: this.getClockString(),
+				position: {
+					x: this.cameraCtrl.yawObject.position.x,
+					y: this.cameraCtrl.state.feetY,
+					z: this.cameraCtrl.yawObject.position.z
+				},
+				cell: {
+					q: ax.q,
+					r: ax.r
+				}
 			};
 
 			if (this.inspect.enabled) {
 				payload.inspect = {
-					type: this.normalizeBlockType(this.inspect.type),
+					type: normalizeInspectBlockType(this.inspect.type),
 					angle: this.inspectAngle,
 					spin: this.inspect.spin
 				};
@@ -263,6 +261,54 @@ export class HexWorldGame implements DisposeBag {
 		window.hexworld_set_inspect_angle = (deg: number) => {
 			this.inspectAngle = Number(deg) || 0;
 			this.applyInspectCamera(this.inspectAngle);
+		};
+
+		window.hexworld_debug_action = (action: string) => {
+			if (action === 'regen') {
+				if (this.currentBiome && !this.inspect.enabled) this.loadBiome(this.currentBiome.id, false);
+				return true;
+			}
+			if (action === 'place_center') {
+				const hit = this.pickBlock();
+				if (!hit) return false;
+				this.placeAdjacent(hit, hit.worldNormal);
+				return true;
+			}
+			if (action === 'remove_center') {
+				const hit = this.pickBlock();
+				if (!hit) return false;
+				this.removeSelected(hit);
+				return true;
+			}
+			if (action === 'place_under_player') {
+				const ax = this.currentAxialUnderPlayer();
+				const y = this.world.getTopSolidY(ax.q, ax.r) + 1;
+				const typeKey = PALETTE[this.selectedPaletteIdx]?.key ?? 'dirt';
+				if (!this.world.has(ax.q, ax.r, y) && this.world.add(ax.q, ax.r, y, typeKey)) {
+					this.biomeManager.recordEdit(ax.q, ax.r, y, typeKey);
+					if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
+					return true;
+				}
+				return false;
+			}
+			if (action === 'remove_top_under_player') {
+				const ax = this.currentAxialUnderPlayer();
+				const y = this.world.getTopSolidY(ax.q, ax.r);
+				const t = this.world.getType(ax.q, ax.r, y);
+				if (!t || FORBIDDEN_BREAK_BLOCKS.has(t)) return false;
+				if (this.world.remove(ax.q, ax.r, y)) {
+					this.biomeManager.recordEdit(ax.q, ax.r, y, null);
+					if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
+					return true;
+				}
+				return false;
+			}
+			if (action === 'answer_quiz_correct') {
+				if (!this.activeQuizQuestion) return false;
+				this.answerQuiz(this.activeQuizQuestion.correctIndex);
+				return true;
+			}
+			return false;
 		};
 	}
 
@@ -280,8 +326,8 @@ export class HexWorldGame implements DisposeBag {
 		add(document, 'pointerlockchange', () => {
 			this.pointerLocked = document.pointerLockElement === this.renderer.domElement;
 			this.updateMouseCursor();
-			if (!this.pointerLocked && !this.menuOpen) {
-				this.showToast('Mouse unlocked. Click to re-lock.', 1800);
+			if (!this.pointerLocked && !this.menuOpen && !this.quizOpen && !this.inspect.enabled) {
+				this.showToast('Mouse unlocked. Click to re-lock.', 1400);
 			}
 		});
 
@@ -293,154 +339,242 @@ export class HexWorldGame implements DisposeBag {
 			if (e.target === this.el.overlay) this.startGame();
 		});
 		add(this.renderer.domElement, 'click', () => {
-			if (!this.inspect.enabled && !this.menuOpen && !this.pointerLocked) this.lockPointer();
+			if (!this.inspect.enabled && !this.menuOpen && !this.quizOpen && !this.pointerLocked) this.lockPointer();
 		});
 
 		add(document, 'mousemove', (e) => {
-			if (this.menuOpen || !this.pointerLocked) return;
+			if (this.menuOpen || this.quizOpen || !this.pointerLocked) return;
 			const me = e as MouseEvent;
-			this.yawObject.rotation.y -= me.movementX * LOOK_SENS;
-			this.pitchObject.rotation.x -= me.movementY * LOOK_SENS;
-			this.pitchObject.rotation.x = Math.max(
-				-Math.PI / 2 + 0.02,
-				Math.min(Math.PI / 2 - 0.02, this.pitchObject.rotation.x)
-			);
+			this.cameraCtrl.rotateByMouse(me.movementX, me.movementY);
 		});
 
 		add(window, 'keydown', (e) => this.onKeyDown(e as KeyboardEvent));
 		add(window, 'keyup', (e) => this.onKeyUp(e as KeyboardEvent));
 		add(window, 'mousedown', (e) => this.onMouseDown(e as MouseEvent));
 
+		add(this.el.quizCancel, 'click', () => this.closeQuiz('Quiz cancelled.'));
+
+		this.bindMobileControls(add);
+
 		if (this.urlParams.get('mute') === '1') {
 			this.audio.setMuted(true);
 		}
 	}
 
-	private async loadTextures(): Promise<void> {
-		const loader = new THREE.TextureLoader();
-		const [tGrassTop, tGrassSide, tDirt, tStone, tSand] = await Promise.all([
-			loadTexture(this.renderer, loader, TEXTURE_PATHS.grass_top, {
-				wrapS: THREE.RepeatWrapping,
-				wrapT: THREE.RepeatWrapping
-			}),
-			loadTexture(this.renderer, loader, TEXTURE_PATHS.grass_side, {
-				wrapS: THREE.RepeatWrapping,
-				wrapT: THREE.ClampToEdgeWrapping,
-				minFilter: THREE.LinearFilter,
-				magFilter: THREE.LinearFilter,
-				generateMipmaps: false
-			}),
-			loadTexture(this.renderer, loader, TEXTURE_PATHS.dirt),
-			loadTexture(this.renderer, loader, TEXTURE_PATHS.stone),
-			loadTexture(this.renderer, loader, TEXTURE_PATHS.sand)
-		]).catch((err: unknown) => {
-			console.warn('Texture load failed:', err);
-			this.showToast('Textures failed to load.', 2800);
-			return [null, null, null, null, null] as const;
-		});
-
-		const [matGrassSide, matGrassTop, matDirt] = this.mats.grass as THREE.MeshStandardMaterial[];
-		const [matStone] = this.mats.stone as THREE.MeshStandardMaterial[];
-		const [matSand] = this.mats.sand as THREE.MeshStandardMaterial[];
-
-		if (tGrassTop) {
-			matGrassTop.map = tGrassTop;
-			this.texRefs.grassTop = tGrassTop;
+	private bindMobileControls(
+		add: (
+			target: EventTarget,
+			type: string,
+			handler: EventListenerOrEventListenerObject,
+			opts?: AddEventListenerOptions | boolean
+		) => void
+	): void {
+		const buttons = this.el.mobileControls.querySelectorAll<HTMLButtonElement>('button[data-move]');
+		for (const btn of buttons) {
+			const moveKey = btn.dataset.move as 'forward' | 'backward' | 'left' | 'right' | 'jump' | undefined;
+			if (!moveKey) continue;
+			add(btn, 'pointerdown', () => this.input.setVirtualMovement({ [moveKey]: true }));
+			const up = () => this.input.setVirtualMovement({ [moveKey]: false });
+			add(btn, 'pointerup', up);
+			add(btn, 'pointercancel', up);
+			add(btn, 'pointerleave', up);
 		}
-		if (tGrassSide) {
-			matGrassSide.map = tGrassSide;
-			this.texRefs.grassSide = tGrassSide;
-		}
-		if (tDirt) matDirt.map = tDirt;
-		if (tStone) matStone.map = tStone;
-		if (tSand) matSand.map = tSand;
+		const interact = this.el.mobileControls.querySelector<HTMLButtonElement>('button[data-action="interact"]');
+		if (interact) add(interact, 'click', () => this.tryInteractNearestPortal());
+	}
 
-		for (const mat of [matGrassTop, matGrassSide, matDirt, matStone, matSand]) {
-			mat.color.set(0xffffff);
-			mat.needsUpdate = true;
+	private loadBiome(biomeId: string, fromPortal: boolean): void {
+		const { manifest, data } = this.biomeManager.loadIntoWorld(this.world, biomeId);
+		this.currentBiome = manifest;
+		this.portalHint = '';
+
+		this.clearPortals();
+		this.clearNpcs();
+		this.createPortals(data.portalAnchors);
+		this.createNpcs(data.npcSpawns);
+
+		this.applyBiomeAtmosphere(manifest, true);
+		this.audio.setBiomeAmbience(manifest.ambience);
+		this.rollWeather(true);
+		this.updateEraBanner();
+
+		const spawn = axialToWorld(0, 0);
+		const ground = this.world.getGroundY(0, 0) + 0.02;
+		this.cameraCtrl.setFeetPosition(spawn.x, ground, spawn.z);
+		this.biomeManager.saveCurrentState(manifest.id);
+		if (fromPortal) this.audio.playPortal();
+		if (fromPortal) this.showToast(`Arrived in ${manifest.place}`, 2200);
+	}
+
+	private clearPortals(): void {
+		for (const p of this.portals) {
+			this.portalGroup.remove(p.mesh);
+			this.portalGroup.remove(p.baseMesh);
+		}
+		this.portals = [];
+	}
+
+	private clearNpcs(): void {
+		for (const npc of this.npcs) this.npcGroup.remove(npc.group);
+		this.npcs = [];
+	}
+
+	private createPortals(anchors: Array<{ q: number; r: number; link: { toBiome: string; label: string } }>): void {
+		const ringGeo = new THREE.TorusGeometry(1.15, 0.18, 12, 24);
+		const baseGeo = new THREE.CylinderGeometry(1.65, 1.7, 0.35, 6);
+		baseGeo.rotateY(Math.PI / 6);
+
+		for (let i = 0; i < anchors.length; i++) {
+			const anchor = anchors[i];
+			const pos = axialToWorld(anchor.q, anchor.r);
+			const topY = this.world.getTopSolidY(anchor.q, anchor.r);
+			const y = Math.max(2, topY + 1);
+
+			const baseMat = new THREE.MeshStandardMaterial({
+				color: 0x263038,
+				roughness: 0.9,
+				metalness: 0.1
+			});
+			const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+			baseMesh.position.set(pos.x, y + 0.18, pos.z);
+
+			const ringMat = new THREE.MeshStandardMaterial({
+				color: 0x84d7ff,
+				emissive: new THREE.Color(0x1f80b8),
+				emissiveIntensity: 1.2,
+				metalness: 0.35,
+				roughness: 0.3
+			});
+			const ring = new THREE.Mesh(ringGeo, ringMat);
+			ring.position.set(pos.x, y + 1.8, pos.z);
+			ring.rotation.x = Math.PI * 0.09;
+
+			this.portalGroup.add(baseMesh);
+			this.portalGroup.add(ring);
+
+			this.portals.push({
+				id: `${anchor.link.toBiome}-${i}`,
+				toBiome: anchor.link.toBiome,
+				label: anchor.link.label,
+				q: anchor.q,
+				r: anchor.r,
+				y,
+				mesh: ring,
+				baseMesh
+			});
 		}
 	}
 
-	private generateWorld(): void {
-		this.world.clear();
+	private createNpcMesh(): THREE.Group {
+		const g = new THREE.Group();
+		const skin = new THREE.MeshStandardMaterial({ color: 0xf2c7a8, roughness: 0.9 });
+		const shirt = new THREE.MeshStandardMaterial({ color: 0x5f92c8, roughness: 0.88 });
+		const pants = new THREE.MeshStandardMaterial({ color: 0x3b4862, roughness: 0.88 });
 
-		const start = axialToWorld(0, 0);
-		this.yawObject.position.set(start.x, 10, start.z);
-		this.yawObject.rotation.set(0, 0, 0);
-		this.pitchObject.rotation.set(0, 0, 0);
+		const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skin);
+		head.position.set(0, 1.38, 0);
+		const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.32), shirt);
+		body.position.set(0, 0.95, 0);
+		const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.48, 0.18), pants);
+		legL.position.set(-0.11, 0.5, 0);
+		const legR = legL.clone();
+		legR.position.set(0.11, 0.5, 0);
+		const armL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.14), skin);
+		armL.position.set(-0.34, 0.96, 0);
+		const armR = armL.clone();
+		armR.position.set(0.34, 0.96, 0);
+		g.add(head, body, legL, legR, armL, armR);
+		return g;
+	}
 
-		const seedQ = Math.floor(Math.random() * 10000) - 5000;
-		const seedR = Math.floor(Math.random() * 10000) - 5000;
+	private createNpcs(spawns: Array<{ q: number; r: number }>): void {
+		const maxNpcs = 16;
+		for (let i = 0; i < Math.min(maxNpcs, spawns.length); i++) {
+			const s = spawns[i];
+			const worldPos = axialToWorld(s.q, s.r);
+			const ground = this.world.getGroundY(s.q, s.r);
+			const group = this.createNpcMesh();
+			group.position.set(worldPos.x, ground + 0.04, worldPos.z);
+			this.npcGroup.add(group);
+			this.npcs.push({
+				id: `npc-${i}`,
+				group,
+				q: s.q,
+				r: s.r,
+				homeQ: s.q,
+				homeR: s.r,
+				speed: 0.9 + Math.random() * 0.8,
+				phase: Math.random() * Math.PI * 2,
+				targetQ: s.q,
+				targetR: s.r
+			});
+			this.assignNpcTarget(this.npcs[this.npcs.length - 1]);
+		}
+	}
 
-		for (let q = -WORLD_RADIUS; q <= WORLD_RADIUS; q++) {
-			for (let r = -WORLD_RADIUS; r <= WORLD_RADIUS; r++) {
-				const d = hexDist(0, 0, q, r);
-				if (d > WORLD_RADIUS) continue;
+	private assignNpcTarget(npc: NpcInstance): void {
+		for (let i = 0; i < 12; i++) {
+			const q = npc.homeQ + Math.floor(Math.random() * 11) - 5;
+			const r = npc.homeR + Math.floor(Math.random() * 11) - 5;
+			if (Math.abs(q) + Math.abs(r) > (this.currentBiome?.radius ?? WORLD_MIN_RADIUS) + 4) continue;
+			if (this.world.getTopSolidY(q, r) < 1) continue;
+			npc.targetQ = q;
+			npc.targetR = r;
+			return;
+		}
+		npc.targetQ = npc.homeQ;
+		npc.targetR = npc.homeR;
+	}
 
-				const falloff = Math.max(0, 1 - d / (WORLD_RADIUS + 0.001));
-				const n = fbm(q + seedQ, r + seedR);
-				const ridge = Math.pow(Math.abs(n - 0.5) * 2, 0.65);
-				const hRaw = (0.35 + 0.65 * n) * (1 - 0.25 * ridge);
-				let h = 1 + Math.floor(falloff * (3 + hRaw * 9));
-				h = Math.max(1, Math.min(h, 12));
+	private updateNpcs(dt: number, nowMs: number): void {
+		for (const npc of this.npcs) {
+			const target = axialToWorld(npc.targetQ, npc.targetR);
+			const dx = target.x - npc.group.position.x;
+			const dz = target.z - npc.group.position.z;
+			const dist = Math.hypot(dx, dz);
 
-				const sandy = falloff < 0.35 && hash2(q * 2 + seedQ, r * 2 + seedR) > 0.45;
-
-				for (let y = 0; y < h; y++) {
-					const top = y === h - 1;
-					const deep = y < h - 3;
-					let typeKey: BlockType = 'dirt';
-					if (deep) typeKey = 'stone';
-					else if (top) typeKey = sandy ? 'sand' : 'grass';
-					else typeKey = sandy ? 'sand' : 'dirt';
-					this.world.add(q, r, y, typeKey);
-				}
+			if (dist < 0.25) {
+				this.assignNpcTarget(npc);
+				continue;
 			}
+
+			const step = Math.min(dist, npc.speed * dt);
+			npc.group.position.x += (dx / Math.max(EPS, dist)) * step;
+			npc.group.position.z += (dz / Math.max(EPS, dist)) * step;
+			npc.group.rotation.y = Math.atan2(-dx, -dz);
+
+			const ax = worldToAxial(npc.group.position.x, npc.group.position.z);
+			npc.q = ax.q;
+			npc.r = ax.r;
+			const ground = this.world.getGroundY(ax.q, ax.r);
+			npc.group.position.y = ground + 0.04 + Math.sin(nowMs * 0.006 + npc.phase) * 0.04;
 		}
-
-		for (let y = 1; y <= 7; y++) this.world.add(0, 0, y, 'stone');
-		this.world.add(0, 0, 8, 'grass');
-	}
-
-	private setupInspect(): void {
-		this.world.clear();
-		const t = this.normalizeBlockType(this.inspect.type);
-		this.world.add(0, 0, 0, t);
-		this.scene.fog = null;
-		this.applyInspectCamera(this.inspectAngle);
-	}
-
-	private normalizeBlockType(type: string): BlockType {
-		if (type === 'grass' || type === 'dirt' || type === 'stone' || type === 'sand') return type;
-		return 'grass';
-	}
-
-	private applyInspectCamera(angleDeg: number): void {
-		const a = (angleDeg * Math.PI) / 180;
-		const cx = Math.cos(a) * this.inspect.distance;
-		const cz = Math.sin(a) * this.inspect.distance;
-		const cy = this.inspect.height;
-		this.yawObject.position.set(cx, cy, cz);
-
-		const tx = 0;
-		const ty = 0.5 * BLOCK_H;
-		const tz = 0;
-		const dx = tx - cx;
-		const dy = ty - cy;
-		const dz = tz - cz;
-		const len = Math.max(EPS, Math.hypot(dx, dy, dz));
-		const ndx = dx / len;
-		const ndy = dy / len;
-		const ndz = dz / len;
-
-		const pitch = Math.asin(Math.max(-1, Math.min(1, ndy)));
-		const yaw = Math.atan2(-ndx, -ndz);
-		this.yawObject.rotation.y = yaw;
-		this.pitchObject.rotation.x = pitch;
 	}
 
 	private onKeyDown(e: KeyboardEvent): void {
-		if (e.code === 'Escape') {
+		if (!this.bootstrapDone && !this.inspect.enabled) return;
+		if (this.quizOpen && e.code === 'Escape') {
+			this.closeQuiz('Quiz cancelled.');
+			return;
+		}
+
+		this.input.keyDown(e.code);
+		this.processOneShotActions();
+
+		const paletteSelection = this.input.consumePaletteSelection(PALETTE.length);
+		if (paletteSelection !== null) {
+			this.selectedPaletteIdx = paletteSelection;
+			updateHotbar(this.el.hotbar, this.selectedPaletteIdx);
+			this.showToast(`Selected: ${PALETTE[this.selectedPaletteIdx].label}`, 900);
+		}
+	}
+
+	private onKeyUp(e: KeyboardEvent): void {
+		this.input.keyUp(e.code);
+	}
+
+	private processOneShotActions(): void {
+		if (this.input.consumeAction('toggleMenu')) {
 			if (!this.menuOpen) {
 				this.setMenu(true);
 				if (document.pointerLockElement) void document.exitPointerLock();
@@ -450,75 +584,96 @@ export class HexWorldGame implements DisposeBag {
 			return;
 		}
 
-		if (e.code === 'Enter' && this.menuOpen) {
+		if (this.input.consumeAction('resumeGame') && this.menuOpen) {
 			this.startGame();
 			return;
 		}
 
-		if (this.menuOpen) return;
+		if (this.menuOpen || this.quizOpen) return;
 
-		if (e.code === 'KeyM') {
+		if (this.input.consumeAction('toggleMute')) {
 			const muted = this.audio.toggleMuted();
 			this.showToast(muted ? 'Sound: muted' : 'Sound: on', 900);
-			return;
 		}
-
-		this.setKey(e.code, true);
-
-		if (e.code === 'KeyR') {
-			if (this.inspect.enabled) {
-				this.setupInspect();
-				this.showToast('Inspect reset');
-			} else {
-				this.generateWorld();
-				this.showToast('World regenerated');
-			}
+		if (this.input.consumeAction('regenerateWorld') && !this.inspect.enabled && this.currentBiome) {
+			this.loadBiome(this.currentBiome.id, false);
+			this.showToast('Biome regenerated');
 		}
-		if (e.code === 'KeyF') {
+		if (this.input.consumeAction('toggleFast')) {
 			this.fast = !this.fast;
 			this.showToast(this.fast ? 'Speed: FAST' : 'Speed: normal');
 		}
-
-		if (e.code.startsWith('Digit')) {
-			const n = Number(e.code.replace('Digit', ''));
-			if (n >= 1 && n <= PALETTE.length) {
-				this.selectedPaletteIdx = n - 1;
-				updateHotbar(this.el.hotbar, this.selectedPaletteIdx);
-				this.showToast(`Selected: ${PALETTE[this.selectedPaletteIdx].label}`, 900);
-			}
+		if (this.input.consumeAction('interactPortal')) {
+			this.tryInteractNearestPortal();
 		}
 	}
 
-	private onKeyUp(e: KeyboardEvent): void {
-		this.setKey(e.code, false);
+	private tryInteractNearestPortal(): void {
+		if (!this.currentBiome) return;
+		const portal = this.findNearestPortal(3.4);
+		if (!portal) {
+			this.showToast('Move closer to a portal ring to travel.', 1300);
+			return;
+		}
+		this.openQuizForPortal(portal);
 	}
 
-	private setKey(code: string, down: boolean): void {
-		switch (code) {
-			case 'KeyW':
-				this.keys.w = down;
-				break;
-			case 'KeyA':
-				this.keys.a = down;
-				break;
-			case 'KeyS':
-				this.keys.s = down;
-				break;
-			case 'KeyD':
-				this.keys.d = down;
-				break;
-			case 'Space':
-				this.keys.space = down;
-				break;
-			case 'ShiftLeft':
-			case 'ShiftRight':
-				this.keys.shift = down;
-				break;
+	private openQuizForPortal(portal: PortalInstance): void {
+		if (!this.currentBiome || !this.currentBiome.quizzes.length) return;
+		const question = this.currentBiome.quizzes[Math.floor(Math.random() * this.currentBiome.quizzes.length)];
+		this.activeQuizPortal = portal;
+		this.activeQuizQuestion = question;
+		this.quizOpen = true;
+		this.el.quizModal.style.display = 'grid';
+		this.el.quizTitle.textContent = `Travel Quiz: ${this.currentBiome.place}`;
+		this.el.quizQuestion.textContent = question.prompt;
+		this.el.quizFeedback.textContent = '';
+		this.el.quizChoices.innerHTML = '';
+
+		for (let i = 0; i < question.options.length; i++) {
+			const btn = document.createElement('button');
+			btn.className = 'quiz-option';
+			btn.textContent = question.options[i];
+			btn.addEventListener('click', () => this.answerQuiz(i));
+			this.el.quizChoices.appendChild(btn);
 		}
+
+		if (document.pointerLockElement) void document.exitPointerLock();
+		this.updateUiModes();
+	}
+
+	private answerQuiz(selectedIndex: number): void {
+		if (!this.activeQuizQuestion || !this.activeQuizPortal) return;
+		const ok = selectedIndex === this.activeQuizQuestion.correctIndex;
+		if (!ok) {
+			this.audio.playQuizResult(false);
+			this.el.quizFeedback.textContent = `Not quite. ${this.activeQuizQuestion.explanation}`;
+			this.el.quizFeedback.dataset.ok = '0';
+			return;
+		}
+
+		this.audio.playQuizResult(true);
+		this.el.quizFeedback.textContent = `Correct. ${this.activeQuizQuestion.explanation}`;
+		this.el.quizFeedback.dataset.ok = '1';
+		const targetBiomeId = this.activeQuizPortal.toBiome;
+		window.setTimeout(() => {
+			this.closeQuiz();
+			this.biomeManager.unlock(targetBiomeId);
+			this.loadBiome(targetBiomeId, true);
+		}, 650);
+	}
+
+	private closeQuiz(toastMessage?: string): void {
+		this.quizOpen = false;
+		this.activeQuizQuestion = null;
+		this.activeQuizPortal = null;
+		this.el.quizModal.style.display = 'none';
+		this.updateUiModes();
+		if (toastMessage) this.showToast(toastMessage, 1100);
 	}
 
 	private onMouseDown(e: MouseEvent): void {
-		if (this.menuOpen || this.inspect.enabled) return;
+		if (this.menuOpen || this.inspect.enabled || this.quizOpen) return;
 		if (e.button !== 0 && e.button !== 2) return;
 		if (!this.pointerLocked) {
 			this.lockPointer();
@@ -535,18 +690,32 @@ export class HexWorldGame implements DisposeBag {
 	private removeSelected(hit: PickHit): void {
 		const ud = hit.object.userData as BlockUserData;
 		if (!ud?.isBlock) return;
+		if (FORBIDDEN_BREAK_BLOCKS.has(ud.typeKey)) {
+			this.showToast('Bedrock cannot be broken.', 800);
+			return;
+		}
 		if (this.world.remove(ud.q, ud.r, ud.y)) {
+			this.biomeManager.recordEdit(ud.q, ud.r, ud.y, null);
 			this.audio.playBreak(ud.typeKey ?? 'dirt');
+			if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
 		}
 	}
 
 	private placeAdjacent(hit: PickHit, worldNormal: THREE.Vector3): void {
 		const n = this.neighborForPlacement(hit, worldNormal);
-		if (n.y < 0 || n.y > MAX_Y) return;
+		if (n.y < 1 || n.y > MAX_Y) return;
 		if (this.world.has(n.q, n.r, n.y)) return;
+
+		const placementPos = axialToWorld(n.q, n.r);
+		const dx = placementPos.x - this.cameraCtrl.yawObject.position.x;
+		const dz = placementPos.z - this.cameraCtrl.yawObject.position.z;
+		if (Math.hypot(dx, dz) < 0.72 && Math.abs(this.cameraCtrl.state.feetY - (n.y + 1)) < 1.9) return;
+
 		const typeKey = PALETTE[this.selectedPaletteIdx]?.key ?? 'dirt';
 		if (this.world.add(n.q, n.r, n.y, typeKey)) {
+			this.biomeManager.recordEdit(n.q, n.r, n.y, typeKey);
 			this.audio.playPlace(typeKey);
+			if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
 		}
 	}
 
@@ -582,7 +751,7 @@ export class HexWorldGame implements DisposeBag {
 	}
 
 	private updateHighlight(): PickHit | null {
-		if (this.inspect.enabled) {
+		if (this.inspect.enabled || this.menuOpen || this.quizOpen) {
 			this.highlight.visible = false;
 			return null;
 		}
@@ -599,7 +768,12 @@ export class HexWorldGame implements DisposeBag {
 	}
 
 	private currentAxialUnderPlayer(): { q: number; r: number } {
-		return worldToAxial(this.yawObject.position.x, this.yawObject.position.z);
+		return worldToAxial(this.cameraCtrl.yawObject.position.x, this.cameraCtrl.yawObject.position.z);
+	}
+
+	private sampleGroundFeetYAtWorld(x: number, z: number): number {
+		const ax = worldToAxial(x, z);
+		return Math.max(1, this.world.getGroundY(ax.q, ax.r));
 	}
 
 	private stepGame(dt: number, nowMs: number): void {
@@ -608,15 +782,28 @@ export class HexWorldGame implements DisposeBag {
 				this.inspectAngle = (this.inspect.angle0 + nowMs * 0.012) % 360;
 				this.applyInspectCamera(this.inspectAngle);
 			}
-		} else if (!this.menuOpen) {
-			const s = (this.fast ? 2.2 : 1.0) * this.speed * dt;
-			if (this.keys.w) this.yawObject.translateZ(-s);
-			if (this.keys.s) this.yawObject.translateZ(s);
-			if (this.keys.a) this.yawObject.translateX(-s);
-			if (this.keys.d) this.yawObject.translateX(s);
-			if (this.keys.space) this.yawObject.position.y += s;
-			if (this.keys.shift) this.yawObject.position.y -= s;
-			this.yawObject.position.y = Math.max(0.5, Math.min(120, this.yawObject.position.y));
+		} else {
+			this.processOneShotActions();
+			if (!this.menuOpen && !this.quizOpen) {
+				this.cameraCtrl.step(
+					dt,
+					this.input.movement,
+					{
+						moveSpeed: PLAYER_MOVE_SPEED,
+						speedMultiplier: this.fast ? 1.95 : 1,
+						minFeetY: 1,
+						maxFeetY: 160,
+						stepHeight: 1.1
+					},
+					(x, z) => this.sampleGroundFeetYAtWorld(x, z)
+				);
+
+				this.dayProgress = (this.dayProgress + dt / 360) % 1;
+				this.updateDayNight(nowMs);
+				this.updateWeather(nowMs, dt);
+				this.updateNpcs(dt, nowMs);
+				this.updatePortalAnimations(nowMs);
+			}
 		}
 
 		const hit = this.updateHighlight();
@@ -629,18 +816,205 @@ export class HexWorldGame implements DisposeBag {
 		}
 
 		this.updateHud(hit);
-		this.updateGrassAnimation(nowMs);
+		this.updatePortalHint();
+		updateNatureTextureAnimation({
+			grassTop: (this.mats.grass[1] as THREE.MeshStandardMaterial).map as THREE.Texture | null,
+			grassSide: (this.mats.grass[0] as THREE.MeshStandardMaterial).map as THREE.Texture | null,
+			sand: (this.mats.sand[0] as THREE.MeshStandardMaterial).map as THREE.Texture | null,
+			water: (this.mats.water[0] as THREE.MeshStandardMaterial).map as THREE.Texture | null
+		}, nowMs);
+		this.audio.step(nowMs, this.daylightFactor());
 		this.renderer.render(this.scene, this.camera);
+	}
+
+	private daylightFactor(): number {
+		const a = this.dayProgress * Math.PI * 2;
+		return Math.max(0, Math.sin(a - Math.PI / 2) * 0.5 + 0.5);
+	}
+
+	private updateDayNight(nowMs: number): void {
+		if (!this.currentBiome) return;
+		const ambience = this.currentBiome.ambience;
+		const daylight = this.daylightFactor();
+		const night = 1 - daylight;
+
+		const dayTop = new THREE.Color(ambience.skyDayTop);
+		const nightTop = new THREE.Color(ambience.skyNightTop);
+		const bg = nightTop.clone().lerp(dayTop, daylight);
+		this.scene.background = bg;
+
+		const dayFog = new THREE.Color(ambience.fogColor);
+		const nightFog = new THREE.Color(ambience.skyNightBottom);
+		const fogColor = nightFog.clone().lerp(dayFog, daylight);
+		if (!this.scene.fog) this.scene.fog = new THREE.FogExp2(fogColor, ambience.fogDensity);
+		(this.scene.fog as THREE.FogExp2).color = fogColor;
+		(this.scene.fog as THREE.FogExp2).density = ambience.fogDensity * (0.84 + night * 0.42);
+
+		const sunAngle = this.dayProgress * Math.PI * 2;
+		this.sunLight.position.set(Math.cos(sunAngle) * 40, 10 + Math.sin(sunAngle) * 38, Math.sin(sunAngle * 0.7) * 28);
+		this.sunLight.color.setHex(ambience.sunColor);
+		this.sunLight.intensity = 0.08 + daylight * 1.18;
+		this.hemiLight.intensity = 0.18 + daylight * 0.92;
+		this.fillLight.intensity = 0.16 + daylight * 0.64;
+
+		if (nowMs >= this.nextWeatherSwitchAtMs) this.rollWeather();
+	}
+
+	private createWeatherParticles(): void {
+		const count = 520;
+		const geo = new THREE.BufferGeometry();
+		const pos = new Float32Array(count * 3);
+		this.weatherVelocity = new Float32Array(count);
+		for (let i = 0; i < count; i++) {
+			pos[i * 3 + 0] = (Math.random() - 0.5) * 48;
+			pos[i * 3 + 1] = Math.random() * 24 + 4;
+			pos[i * 3 + 2] = (Math.random() - 0.5) * 48;
+			this.weatherVelocity[i] = 1.5 + Math.random() * 2;
+		}
+		geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+		const mat = new THREE.PointsMaterial({
+			color: 0xdff5ff,
+			size: 0.12,
+			transparent: true,
+			opacity: 0.8,
+			depthWrite: false
+		});
+		this.weatherParticles = new THREE.Points(geo, mat);
+		this.weatherParticles.visible = false;
+		this.scene.add(this.weatherParticles);
+	}
+
+	private updateWeather(nowMs: number, dt: number): void {
+		if (!this.weatherParticles) this.createWeatherParticles();
+		if (!this.weatherParticles) return;
+
+		const p = this.weatherParticles;
+		const attr = p.geometry.getAttribute('position') as THREE.BufferAttribute;
+		const arr = attr.array as Float32Array;
+		const baseX = this.cameraCtrl.yawObject.position.x;
+		const baseY = this.cameraCtrl.state.feetY;
+		const baseZ = this.cameraCtrl.yawObject.position.z;
+
+		const visible = this.currentWeather !== 'clear';
+		p.visible = visible;
+		if (!visible) return;
+
+		let fallSpeed = 6.5;
+		let drift = 0.35;
+		let size = 0.12;
+		let color = 0xdaf3ff;
+		if (this.currentWeather === 'rain') {
+			fallSpeed = 18;
+			drift = 0.9;
+			size = 0.09;
+			color = 0xb9ddff;
+		} else if (this.currentWeather === 'snow') {
+			fallSpeed = 5.2;
+			drift = 0.5;
+			size = 0.18;
+			color = 0xf4fbff;
+		} else if (this.currentWeather === 'mist') {
+			fallSpeed = 1.6;
+			drift = 0.22;
+			size = 0.22;
+			color = 0xe7f5ff;
+		}
+
+		p.material.size = size;
+		p.material.color.setHex(color);
+
+		for (let i = 0; i < this.weatherVelocity.length; i++) {
+			const idx = i * 3;
+			arr[idx + 1] -= (fallSpeed + this.weatherVelocity[i]) * dt;
+			arr[idx + 0] += Math.sin(nowMs * 0.001 + i) * drift * dt;
+			arr[idx + 2] += Math.cos(nowMs * 0.0012 + i * 0.3) * drift * 0.7 * dt;
+
+			if (arr[idx + 1] < baseY - 2) {
+				arr[idx + 0] = baseX + (Math.random() - 0.5) * 44;
+				arr[idx + 1] = baseY + 18 + Math.random() * 10;
+				arr[idx + 2] = baseZ + (Math.random() - 0.5) * 44;
+			}
+		}
+		attr.needsUpdate = true;
+	}
+
+	private rollWeather(initial = false): void {
+		if (!this.currentBiome) return;
+		const pool = this.currentBiome.ambience.weatherPool;
+		let next = pool[Math.floor(Math.random() * pool.length)] ?? 'clear';
+		if (pool.length > 1 && next === this.currentWeather) {
+			next = pool[(pool.indexOf(next) + 1) % pool.length] ?? next;
+		}
+		this.currentWeather = next;
+		this.audio.setWeather(next);
+		const now = performance.now();
+		this.nextWeatherSwitchAtMs = now + 30000 + Math.random() * 50000;
+		if (!initial) this.showToast(`Weather changed: ${WEATHER_LABEL[next]}`, 1400);
+	}
+
+	private updatePortalAnimations(nowMs: number): void {
+		for (let i = 0; i < this.portals.length; i++) {
+			const p = this.portals[i];
+			p.mesh.rotation.y += 0.01 + i * 0.0008;
+			const mat = p.mesh.material as THREE.MeshStandardMaterial;
+			mat.emissiveIntensity = 0.8 + Math.sin(nowMs * 0.004 + i) * 0.45;
+		}
+	}
+
+	private findNearestPortal(maxDistance: number): PortalInstance | null {
+		let best: PortalInstance | null = null;
+		let bestD2 = maxDistance * maxDistance;
+		const x = this.cameraCtrl.yawObject.position.x;
+		const z = this.cameraCtrl.yawObject.position.z;
+		for (const p of this.portals) {
+			const dx = p.mesh.position.x - x;
+			const dz = p.mesh.position.z - z;
+			const d2 = dx * dx + dz * dz;
+			if (d2 < bestD2) {
+				bestD2 = d2;
+				best = p;
+			}
+		}
+		return best;
+	}
+
+	private updatePortalHint(): void {
+		if (this.menuOpen || this.quizOpen || this.inspect.enabled) {
+			this.portalHint = '';
+			return;
+		}
+		const portal = this.findNearestPortal(3.4);
+		if (!portal) {
+			this.portalHint = '';
+			return;
+		}
+		const target = this.biomeManager.getBiome(portal.toBiome);
+		this.portalHint = `Press E for ${portal.label} -> ${target.place}`;
+	}
+
+	private applyBiomeAtmosphere(manifest: BiomeManifest, initial = false): void {
+		if (initial) {
+			this.scene.fog = new THREE.FogExp2(manifest.ambience.fogColor, manifest.ambience.fogDensity);
+			this.scene.background = new THREE.Color(manifest.ambience.skyDayTop);
+		}
+	}
+
+	private updateEraBanner(): void {
+		if (!this.currentBiome) {
+			this.el.eraBanner.textContent = '';
+			return;
+		}
+		this.el.eraBanner.textContent = `${this.currentBiome.place} | ${this.currentBiome.eraLabel} | ${this.currentBiome.yearLabel}`;
 	}
 
 	private updateHud(hit: PickHit | null): void {
 		if (this.inspect.enabled) {
 			if (!this.inspect.ui) return;
-			this.el.hud.innerHTML = `
-				<div class="row"><span class="label">mode</span><span>inspect</span></div>
-				<div class="row"><span class="label">type</span><span>${this.normalizeBlockType(this.inspect.type)}</span></div>
-				<div class="row"><span class="label">angle</span><span>${this.inspectAngle.toFixed(1)} deg</span></div>
-			`;
+			setHudRows(this.el.hud, [
+				{ label: 'mode', value: 'inspect' },
+				{ label: 'type', value: normalizeInspectBlockType(this.inspect.type) },
+				{ label: 'angle', value: `${this.inspectAngle.toFixed(1)} deg` }
+			]);
 			return;
 		}
 		if (this.menuOpen) return;
@@ -648,30 +1022,37 @@ export class HexWorldGame implements DisposeBag {
 		const ax = this.currentAxialUnderPlayer();
 		const sel = PALETTE[this.selectedPaletteIdx];
 		const hitStr = hit
-			? `hit q=${(hit.object.userData as BlockUserData).q} r=${(hit.object.userData as BlockUserData).r} y=${(hit.object.userData as BlockUserData).y}`
-			: 'hit -';
+			? `q=${(hit.object.userData as BlockUserData).q} r=${(hit.object.userData as BlockUserData).r} y=${(hit.object.userData as BlockUserData).y}`
+			: '-';
 
-		this.el.hud.innerHTML = `
-			<div class="row"><span class="label">fps</span><span>${this.fps}</span></div>
-			<div class="row"><span class="label">pos</span><span>${this.yawObject.position.x.toFixed(2)}, ${this.yawObject.position.y.toFixed(2)}, ${this.yawObject.position.z.toFixed(2)}</span></div>
-			<div class="row"><span class="label">cell</span><span>q=${ax.q} r=${ax.r}</span></div>
-			<div class="row"><span class="label">blocks</span><span>${this.world.blocks.size}</span></div>
-			<div class="row"><span class="label">tool</span><span>${sel.label} (${sel.key})</span></div>
-			<div class="row"><span class="label">pick</span><span>${hitStr}</span></div>
-			<div class="row"><span class="label">sound</span><span>${this.audio.isMuted() ? '<span class="warn">muted</span>' : 'on'} (<span class="warn">M</span>)</span></div>
-			<div class="row"><span class="label">hint</span><span><span class="warn">LMB</span> remove, <span class="warn">RMB</span> place, <span class="warn">F</span> speed</span></div>
-		`;
+		setHudRows(this.el.hud, [
+			{ label: 'fps', value: String(this.fps) },
+			{ label: 'biome', value: this.currentBiome?.place ?? '-' },
+			{ label: 'era', value: this.currentBiome?.yearLabel ?? '-' },
+			{ label: 'time', value: this.getClockString() },
+			{ label: 'weather', value: WEATHER_LABEL[this.currentWeather] },
+			{
+				label: 'pos',
+				value: `${this.cameraCtrl.yawObject.position.x.toFixed(1)}, ${this.cameraCtrl.state.feetY.toFixed(1)}, ${this.cameraCtrl.yawObject.position.z.toFixed(1)}`
+			},
+			{ label: 'cell', value: `q=${ax.q} r=${ax.r}` },
+			{ label: 'blocks', value: String(this.world.blocks.size) },
+			{ label: 'npcs', value: String(this.npcs.length) },
+			{ label: 'tool', value: `${sel.label} (${sel.key})` },
+			{ label: 'pick', value: hitStr },
+			{ label: 'portal', value: this.portalHint || '-' },
+			{ label: 'sound', value: this.audio.isMuted() ? 'muted (M)' : 'on (M)' },
+			{ label: 'hint', value: 'LMB remove, RMB place, E portal quiz, Space jump, F fast' }
+		]);
 	}
 
-	private updateGrassAnimation(nowMs: number): void {
-		const t = nowMs * 0.001;
-		if (this.texRefs.grassTop) {
-			this.texRefs.grassTop.offset.x = 0.007 * Math.sin(t * 0.45);
-			this.texRefs.grassTop.offset.y = 0.005 * Math.cos(t * 0.39);
-		}
-		if (this.texRefs.grassSide) {
-			this.texRefs.grassSide.offset.x = 0.01 * Math.sin(t * 0.65 + 0.8);
-		}
+	private getClockString(): string {
+		const mins = Math.floor(this.dayProgress * 24 * 60) % (24 * 60);
+		const h = Math.floor(mins / 60)
+			.toString()
+			.padStart(2, '0');
+		const m = (mins % 60).toString().padStart(2, '0');
+		return `${h}:${m}`;
 	}
 
 	private animate = (): void => {
@@ -690,23 +1071,28 @@ export class HexWorldGame implements DisposeBag {
 	}
 
 	private lockPointer(): void {
-		if (this.inspect.enabled) return;
+		if (this.inspect.enabled || this.quizOpen) return;
 		if (document.pointerLockElement) return;
 		void this.renderer.domElement.requestPointerLock();
 	}
 
 	private setMenu(open: boolean): void {
 		this.menuOpen = open;
-		this.el.overlay.style.display = open ? 'grid' : 'none';
-		this.el.hud.style.display = open ? 'none' : 'block';
-		this.el.hotbar.style.display = open ? 'none' : 'flex';
-		this.el.crosshair.style.display = open ? 'none' : 'block';
+		this.updateUiModes();
+		if (open) this.input.clearMovement();
+	}
+
+	private updateUiModes(): void {
+		const showOverlay = this.menuOpen && !this.inspect.enabled;
+		this.el.overlay.style.display = showOverlay ? 'grid' : 'none';
+
+		const showHud = !this.menuOpen;
+		this.el.hud.style.display = showHud ? 'block' : 'none';
+		this.el.hotbar.style.display = !this.menuOpen && !this.quizOpen && !this.inspect.enabled ? 'flex' : 'none';
+		this.el.crosshair.style.display = !this.menuOpen && !this.quizOpen && !this.inspect.enabled ? 'block' : 'none';
+		this.el.eraBanner.style.display = !this.menuOpen && !this.inspect.enabled ? 'block' : 'none';
+		this.el.mobileControls.style.display = !this.menuOpen && !this.quizOpen && !this.inspect.enabled ? 'grid' : 'none';
 		this.updateMouseCursor();
-		if (open) {
-			for (const k of Object.keys(this.keys) as Array<keyof KeyState>) {
-				this.keys[k] = false;
-			}
-		}
 	}
 
 	private enterInspectUiMode(): void {
@@ -716,6 +1102,8 @@ export class HexWorldGame implements DisposeBag {
 			this.el.hotbar.style.display = 'none';
 			this.el.crosshair.style.display = 'none';
 			this.el.toast.style.display = 'none';
+			this.el.eraBanner.style.display = 'none';
+			this.el.mobileControls.style.display = 'none';
 		}
 	}
 
@@ -742,6 +1130,28 @@ export class HexWorldGame implements DisposeBag {
 		this.camera.updateProjectionMatrix();
 		this.renderer.setSize(w, h, false);
 	}
+
+	private setupInspect(): void {
+		this.world.clear();
+		const t = normalizeInspectBlockType(this.inspect.type);
+		this.world.add(0, 0, 0, t);
+		this.scene.fog = null;
+		this.applyInspectCamera(this.inspectAngle);
+	}
+
+	private applyInspectCamera(angleDeg: number): void {
+		const a = (angleDeg * Math.PI) / 180;
+		const cx = Math.cos(a) * this.inspect.distance;
+		const cz = Math.sin(a) * this.inspect.distance;
+		const cy = this.inspect.height;
+		this.cameraCtrl.setFeetPosition(cx, cy, cz);
+
+		const tx = 0;
+		const ty = 0.5 * BLOCK_H + 1.62;
+		const tz = 0;
+		const target = new THREE.Vector3(tx, ty, tz);
+		this.cameraCtrl.lookAt(target);
+	}
 }
 
 declare global {
@@ -749,5 +1159,6 @@ declare global {
 		render_game_to_text?: () => string;
 		advanceTime?: (ms: number) => void;
 		hexworld_set_inspect_angle?: (deg: number) => void;
+		hexworld_debug_action?: (action: string) => boolean;
 	}
 }
