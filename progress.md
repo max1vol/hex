@@ -11,3 +11,21 @@ Original prompt: in this directory please create kelvin.html file with a Three.j
 - Generated/updated all required textures via Nano Banana workflow and integrated them in `static/textures`.
 - Added save/load for biome edits and unlocked portals via local storage.
 - Added unit tests (Vitest) and Playwright e2e scenarios; screenshot fallback exported through canvas data URL due headless WebGL screenshot timeouts.
+- Ported audio and control behavior from `~/projects/steal` into modular runtime:
+  - Added `static/audio/*` (`forest_ambience.mp3`, `desert_travel.ogg`, `outer_space.mp3`, `portal.ogg`, attribution).
+  - Replaced procedural-only audio with track-based BGM crossfade + portal sample + WebAudio block break/place SFX modeled after `steal`.
+  - Added explicit audio unlock on first user interaction (keyboard, mouse, touch CTA/mobile controls).
+- Updated controls to match `steal` expectations:
+  - Keyboard movement now supports both `WASD` and arrow keys.
+  - Descend now supports both `Shift` and `Ctrl`.
+  - Mobile controls now include a dedicated `Down` button.
+- Hardened touchscreen behavior against browser gesture interference:
+  - Added `touch-action: none`, `overscroll-behavior: none`, and selection suppression styles on root/canvas/UI.
+  - Added non-passive touch/pointer handlers and `preventDefault` paths for canvas/overlay/mobile/quiz interactions.
+  - Updated viewport meta to disable pinch zoom (`user-scalable=no`, `maximum-scale=1`, `viewport-fit=cover`).
+- Validation performed:
+  - `npm run check` -> pass.
+  - `npm run test:unit` -> pass.
+  - Ran develop-web-game Playwright loop via `web_game_playwright_client.js` against `http://127.0.0.1:5173`, produced `shot-0..2` and `state-0..2` and verified rendered gameplay/touch UI; no console error artifact emitted.
+- Dev server note:
+  - Maintained `hexworld-dev` tmux session at `http://127.0.0.1:5173` with logs in `/tmp/hexworld-dev.log`.

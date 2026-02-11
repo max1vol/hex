@@ -1,44 +1,69 @@
 import type { BiomeAmbience, BlockType, WeatherKind } from './types';
 
-interface AudioEngine {
-	ctx: AudioContext;
-	master: GainNode;
-	musicBus: GainNode;
-	sfxBus: GainNode;
-	weatherBus: GainNode;
-	noiseBuf: AudioBuffer;
-	musicOscA: OscillatorNode;
-	musicOscB: OscillatorNode;
-	musicGainA: GainNode;
-	musicGainB: GainNode;
-	weatherNoise: AudioBufferSourceNode;
-	weatherFilter: BiquadFilterNode;
-	weatherGain: GainNode;
+interface BgmTrack {
+	url: string;
+	volume: number;
 }
 
-interface MusicState {
-	root: number;
-	accent: number;
-	tempoBpm: number;
-	lastPulseMs: number;
-}
+type SurfaceTone = 'stone' | 'sand' | 'metal' | 'glass' | 'earth';
+
+const TRACK_FOREST: BgmTrack = { url: '/audio/forest_ambience.mp3', volume: 0.48 };
+const TRACK_DESERT: BgmTrack = { url: '/audio/desert_travel.ogg', volume: 0.42 };
+const TRACK_SPACE: BgmTrack = { url: '/audio/outer_space.mp3', volume: 0.38 };
+
+const TRACK_BY_BIOME: Record<string, BgmTrack> = {
+	'grassland-origins': TRACK_FOREST,
+	'ancient-egypt': TRACK_DESERT,
+	'ice-age': TRACK_SPACE,
+	'ancient-rome': TRACK_DESERT,
+	'paris-industrial': TRACK_FOREST,
+	'new-york-harbor': TRACK_FOREST,
+	'london-westminster': TRACK_FOREST,
+	'san-francisco-bay': TRACK_FOREST
+};
 
 export class HexWorldAudio {
 	private muted = false;
-	private engine: AudioEngine | null = null;
-	private readonly music: MusicState = {
-		root: 220,
-		accent: 330,
-		tempoBpm: 88,
-		lastPulseMs: 0
-	};
+	private unlocked = false;
 	private weather: WeatherKind = 'clear';
+
+	private readonly bgmCache = new Map<string, HTMLAudioElement>();
+	private readonly fadingOut: HTMLAudioElement[] = [];
+	private currentBgm: HTMLAudioElement | null = null;
+	private bgmTargetVolume = TRACK_FOREST.volume;
+	private pendingBgm: BgmTrack | null = TRACK_FOREST;
+	private lastStepMs = 0;
+
+	private currentBiomeId: string | null = null;
+	private currentAmbience: BiomeAmbience | null = null;
+
+	private readonly portalSfx = new Audio('/audio/portal.ogg');
+	private sfxCtx: AudioContext | null = null;
+	private breakNoise: AudioBuffer | null = null;
+
+	constructor() {
+		this.portalSfx.preload = 'auto';
+		this.portalSfx.volume = 0.7;
+	}
+
+	unlock(): void {
+		if (this.unlocked) return;
+		this.unlocked = true;
+		if (this.pendingBgm) {
+			this.switchBgm(this.pendingBgm.url, this.pendingBgm.volume);
+			this.pendingBgm = null;
+		}
+	}
 
 	setMuted(next: boolean): void {
 		this.muted = next;
-		if (this.engine) {
-			this.engine.master.gain.setTargetAtTime(next ? 0.0001 : 0.75, this.engine.ctx.currentTime, 0.05);
+		if (next) {
+			if (this.currentBgm) this.currentBgm.volume = 0;
+			for (const fading of this.fadingOut) fading.volume = 0;
+			return;
 		}
+		this.unlock();
+		if (this.currentBgm?.paused) void this.currentBgm.play().catch(() => {});
 	}
 
 	toggleMuted(): boolean {
@@ -50,300 +75,250 @@ export class HexWorldAudio {
 		return this.muted;
 	}
 
-	setBiomeAmbience(ambience: BiomeAmbience): void {
-		this.music.root = ambience.musicRoot;
-		this.music.accent = ambience.musicAccent;
-		this.music.tempoBpm = ambience.tempoBpm;
-		const a = this.ensureEngine();
-		if (!a) return;
-		const t = a.ctx.currentTime;
-		a.musicOscA.frequency.setTargetAtTime(this.music.root, t, 0.45);
-		a.musicOscB.frequency.setTargetAtTime(this.music.accent, t, 0.45);
+	setBiomeAmbience(ambience: BiomeAmbience, biomeId?: string): void {
+		this.currentAmbience = ambience;
+		if (typeof biomeId === 'string' && biomeId.length) this.currentBiomeId = biomeId;
+		const track = this.pickTrack();
+		this.switchBgm(track.url, track.volume);
 	}
 
 	setWeather(kind: WeatherKind): void {
 		this.weather = kind;
-		const a = this.ensureEngine();
-		if (!a) return;
-		const t = a.ctx.currentTime;
-
-		let gain = 0.0001;
-		let freq = 1400;
-		let q = 0.6;
-		if (kind === 'rain') {
-			gain = 0.2;
-			freq = 1600;
-			q = 0.8;
-		} else if (kind === 'snow') {
-			gain = 0.14;
-			freq = 1000;
-			q = 0.55;
-		} else if (kind === 'mist') {
-			gain = 0.08;
-			freq = 700;
-			q = 0.35;
-		}
-
-		a.weatherFilter.frequency.setTargetAtTime(freq, t, 0.3);
-		a.weatherFilter.Q.setTargetAtTime(q, t, 0.3);
-		a.weatherGain.gain.setTargetAtTime(gain, t, 0.4);
 	}
 
-	step(nowMs: number, daylight: number): void {
-		if (this.muted) return;
-		const a = this.ensureEngine();
-		if (!a) return;
-		void a.ctx.resume();
-		const t = a.ctx.currentTime;
+	step(nowMs: number, _daylight: number): void {
+		if (!this.unlocked) return;
+		if (this.currentBgm?.paused && !this.muted) {
+			void this.currentBgm.play().catch(() => {});
+		}
 
-		const bright = Math.max(0.08, daylight);
-		a.musicGainA.gain.setTargetAtTime(0.11 * bright, t, 0.18);
-		a.musicGainB.gain.setTargetAtTime(0.085 * (0.35 + bright), t, 0.16);
+		if (!this.lastStepMs) this.lastStepMs = nowMs;
+		const delta = Math.max(0.001, Math.min(1, (nowMs - this.lastStepMs) / 1000));
+		this.lastStepMs = nowMs;
 
-		const pulseEveryMs = (60 / Math.max(40, this.music.tempoBpm)) * 1000;
-		if (nowMs - this.music.lastPulseMs >= pulseEveryMs) {
-			this.music.lastPulseMs = nowMs;
-			this.playPulse(t, daylight);
+		const target = this.muted ? 0 : this.bgmTargetVolume;
+		if (this.currentBgm) {
+			this.currentBgm.volume += (target - this.currentBgm.volume) * Math.min(1, delta * 2.2);
+		}
+
+		for (let i = this.fadingOut.length - 1; i >= 0; i--) {
+			const fading = this.fadingOut[i];
+			fading.volume = Math.max(0, fading.volume - delta * 0.6);
+			if (fading.volume <= 0.001) {
+				fading.pause();
+				fading.currentTime = 0;
+				this.fadingOut.splice(i, 1);
+			}
 		}
 	}
 
 	playPortal(): void {
-		if (this.muted) return;
-		const a = this.ensureEngine();
-		if (!a) return;
-		const t = a.ctx.currentTime;
-		for (let i = 0; i < 3; i++) {
-			const o = a.ctx.createOscillator();
-			const g = a.ctx.createGain();
-			o.type = 'sine';
-			const start = t + i * 0.06;
-			o.frequency.setValueAtTime(360 + i * 90, start);
-			o.frequency.exponentialRampToValueAtTime(540 + i * 110, start + 0.16);
-			g.gain.setValueAtTime(0.0001, start);
-			g.gain.exponentialRampToValueAtTime(0.16, start + 0.02);
-			g.gain.exponentialRampToValueAtTime(0.0001, start + 0.2);
-			o.connect(g);
-			g.connect(a.sfxBus);
-			o.start(start);
-			o.stop(start + 0.24);
-		}
+		if (this.muted || !this.unlocked) return;
+		const instance = this.portalSfx.cloneNode(true) as HTMLAudioElement;
+		instance.volume = this.portalSfx.volume;
+		void instance.play().catch(() => {});
 	}
 
 	playQuizResult(ok: boolean): void {
-		if (this.muted) return;
-		const a = this.ensureEngine();
-		if (!a) return;
-		const t = a.ctx.currentTime;
-		const notes = ok ? [330, 440, 554] : [290, 240, 190];
-		notes.forEach((f, i) => {
-			const o = a.ctx.createOscillator();
-			const g = a.ctx.createGain();
-			o.type = ok ? 'triangle' : 'sawtooth';
-			const at = t + i * 0.07;
-			o.frequency.setValueAtTime(f, at);
-			g.gain.setValueAtTime(0.0001, at);
-			g.gain.exponentialRampToValueAtTime(ok ? 0.18 : 0.12, at + 0.015);
-			g.gain.exponentialRampToValueAtTime(0.0001, at + 0.15);
-			o.connect(g);
-			g.connect(a.sfxBus);
-			o.start(at);
-			o.stop(at + 0.17);
-		});
+		const ctx = this.ensureSfxContext();
+		if (!ctx) return;
+		const t = ctx.currentTime;
+		const notes = ok ? [660, 880, 1108] : [320, 260, 190];
+		for (let i = 0; i < notes.length; i++) {
+			const osc = ctx.createOscillator();
+			const gain = ctx.createGain();
+			const at = t + i * 0.06;
+			osc.type = ok ? 'triangle' : 'sawtooth';
+			osc.frequency.setValueAtTime(notes[i], at);
+			gain.gain.setValueAtTime(0.0001, at);
+			gain.gain.exponentialRampToValueAtTime(ok ? 0.12 : 0.1, at + 0.015);
+			gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.14);
+			osc.connect(gain);
+			gain.connect(ctx.destination);
+			osc.start(at);
+			osc.stop(at + 0.16);
+		}
 	}
 
 	playPlace(typeKey: BlockType): void {
-		if (this.muted) return;
-		const a = this.ensureEngine();
-		if (!a) return;
-		const { ctx, sfxBus, noiseBuf } = a;
-		void ctx.resume();
-		const t = ctx.currentTime;
+		const ctx = this.ensureSfxContext();
+		if (!ctx || !this.breakNoise) return;
+		const tone = classifyTone(typeKey);
+		const now = ctx.currentTime;
 
-		const tone = ctx.createOscillator();
-		const toneGain = ctx.createGain();
-		const toneFilter = ctx.createBiquadFilter();
-		tone.type = 'triangle';
+		const gain = ctx.createGain();
+		const baseVolume =
+			tone === 'glass' ? 0.06 : tone === 'stone' ? 0.08 : tone === 'sand' ? 0.07 : tone === 'metal' ? 0.082 : 0.075;
+		gain.gain.setValueAtTime(0.0001, now);
+		gain.gain.exponentialRampToValueAtTime(baseVolume, now + 0.004);
+		gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.065);
 
-		let base = 220;
-		if (typeKey === 'stone' || typeKey === 'bedrock') base = 180;
-		if (typeKey === 'sand') base = 260;
-		if (typeKey === 'grass') base = 240;
-		if (typeKey === 'metal') base = 320;
-		base *= 1 + (Math.random() * 0.08 - 0.04);
+		const filter = ctx.createBiquadFilter();
+		filter.type = 'lowpass';
+		const cutoff = tone === 'glass' ? 2400 : tone === 'stone' ? 1250 : tone === 'sand' ? 700 : tone === 'metal' ? 1700 : 900;
+		filter.frequency.setValueAtTime(cutoff, now);
+		filter.Q.setValueAtTime(0.7, now);
 
-		tone.frequency.setValueAtTime(base, t);
-		tone.frequency.exponentialRampToValueAtTime(Math.max(60, base * 0.55), t + 0.07);
-		toneFilter.type = 'lowpass';
-		toneFilter.frequency.setValueAtTime(9000, t);
-		toneFilter.frequency.exponentialRampToValueAtTime(typeKey === 'metal' ? 4200 : 2200, t + 0.06);
-
-		toneGain.gain.setValueAtTime(0.0001, t);
-		toneGain.gain.exponentialRampToValueAtTime(typeKey === 'metal' ? 0.26 : 0.22, t + 0.005);
-		toneGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
-
-		tone.connect(toneFilter);
-		toneFilter.connect(toneGain);
-		toneGain.connect(sfxBus);
-		tone.start(t);
-		tone.stop(t + 0.11);
-
-		const n = ctx.createBufferSource();
-		n.buffer = noiseBuf;
-		const nGain = ctx.createGain();
-		const nFilter = ctx.createBiquadFilter();
-		nFilter.type = 'bandpass';
-		nFilter.frequency.setValueAtTime(typeKey === 'sand' ? 1100 : typeKey === 'metal' ? 2600 : 1900, t);
-		nFilter.Q.setValueAtTime(typeKey === 'stone' ? 0.9 : 0.7, t);
-
-		nGain.gain.setValueAtTime(0.0001, t);
-		nGain.gain.exponentialRampToValueAtTime(typeKey === 'stone' ? 0.1 : 0.07, t + 0.004);
-		nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
-
-		n.connect(nFilter);
-		nFilter.connect(nGain);
-		nGain.connect(sfxBus);
-		n.start(t);
-		n.stop(t + 0.04);
+		const src = ctx.createBufferSource();
+		src.buffer = this.breakNoise;
+		const rate = tone === 'sand' ? 1.05 : tone === 'glass' ? 1.2 : tone === 'metal' ? 1.14 : 1.1;
+		src.playbackRate.setValueAtTime(rate, now);
+		src.connect(filter);
+		filter.connect(gain);
+		gain.connect(ctx.destination);
+		src.start(now);
+		src.stop(now + 0.08);
 	}
 
 	playBreak(typeKey: BlockType): void {
-		if (this.muted) return;
-		const a = this.ensureEngine();
-		if (!a) return;
-		const { ctx, sfxBus, noiseBuf } = a;
-		void ctx.resume();
-		const t = ctx.currentTime;
+		const ctx = this.ensureSfxContext();
+		if (!ctx || !this.breakNoise) return;
+		const tone = classifyTone(typeKey);
+		const now = ctx.currentTime;
 
-		const n = ctx.createBufferSource();
-		n.buffer = noiseBuf;
-		const nGain = ctx.createGain();
-		const nFilter = ctx.createBiquadFilter();
-		nFilter.type = 'bandpass';
-		const f0 = typeKey === 'stone' || typeKey === 'bedrock' ? 1800 : typeKey === 'sand' ? 900 : 1400;
-		const f1 = typeKey === 'stone' || typeKey === 'bedrock' ? 700 : typeKey === 'sand' ? 420 : 540;
-		nFilter.frequency.setValueAtTime(f0, t);
-		nFilter.frequency.exponentialRampToValueAtTime(f1, t + 0.16);
-		nFilter.Q.setValueAtTime(typeKey === 'stone' || typeKey === 'bedrock' ? 1.15 : 0.9, t);
+		const gain = ctx.createGain();
+		const baseVolume =
+			tone === 'glass'
+				? 0.085
+				: tone === 'stone'
+					? 0.12
+					: tone === 'sand'
+						? 0.095
+						: tone === 'metal'
+							? 0.11
+							: 0.105;
+		gain.gain.setValueAtTime(0.0001, now);
+		gain.gain.exponentialRampToValueAtTime(baseVolume, now + 0.008);
+		gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
 
-		nGain.gain.setValueAtTime(0.0001, t);
-		nGain.gain.exponentialRampToValueAtTime(typeKey === 'stone' ? 0.34 : 0.26, t + 0.01);
-		nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+		const filter = ctx.createBiquadFilter();
+		filter.type = 'bandpass';
+		const centerFreq =
+			tone === 'glass' ? 1450 : tone === 'stone' ? 720 : tone === 'sand' ? 520 : tone === 'metal' ? 980 : 420;
+		filter.frequency.setValueAtTime(centerFreq, now);
+		filter.Q.setValueAtTime(0.9, now);
 
-		n.connect(nFilter);
-		nFilter.connect(nGain);
-		nGain.connect(sfxBus);
-		n.start(t);
-		n.stop(t + 0.22);
+		const src = ctx.createBufferSource();
+		src.buffer = this.breakNoise;
+		const rate = tone === 'sand' ? 0.85 : tone === 'metal' ? 0.96 : 1;
+		src.playbackRate.setValueAtTime(rate, now);
+		src.connect(filter);
+		filter.connect(gain);
+		gain.connect(ctx.destination);
+		src.start(now);
+		src.stop(now + 0.16);
 
-		const th = ctx.createOscillator();
-		const thGain = ctx.createGain();
-		th.type = typeKey === 'stone' || typeKey === 'bedrock' ? 'sine' : 'triangle';
-		const th0 = (typeKey === 'stone' ? 92 : typeKey === 'sand' ? 70 : 80) * (1 + (Math.random() * 0.06 - 0.03));
-		th.frequency.setValueAtTime(th0, t);
-		th.frequency.exponentialRampToValueAtTime(Math.max(32, th0 * 0.55), t + 0.14);
-
-		thGain.gain.setValueAtTime(0.0001, t);
-		thGain.gain.exponentialRampToValueAtTime(typeKey === 'stone' ? 0.22 : 0.18, t + 0.012);
-		thGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
-
-		th.connect(thGain);
-		thGain.connect(sfxBus);
-		th.start(t);
-		th.stop(t + 0.19);
+		const tickOsc = ctx.createOscillator();
+		tickOsc.type = tone === 'stone' ? 'triangle' : 'sine';
+		const tickFreq = tone === 'glass' ? 1220 : tone === 'stone' ? 230 : tone === 'sand' ? 520 : tone === 'metal' ? 420 : 360;
+		tickOsc.frequency.setValueAtTime(tickFreq, now);
+		const tickGain = ctx.createGain();
+		tickGain.gain.setValueAtTime(0.0001, now);
+		tickGain.gain.exponentialRampToValueAtTime(baseVolume * 0.65, now + 0.006);
+		tickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.06);
+		tickOsc.connect(tickGain);
+		tickGain.connect(ctx.destination);
+		tickOsc.start(now);
+		tickOsc.stop(now + 0.07);
 	}
 
-	private playPulse(t: number, daylight: number): void {
-		if (!this.engine) return;
-		const g = this.engine.ctx.createGain();
-		const o = this.engine.ctx.createOscillator();
-		o.type = 'sine';
-		const accent = daylight > 0.5 ? this.music.accent : this.music.root * 0.75;
-		o.frequency.setValueAtTime(accent, t);
-		g.gain.setValueAtTime(0.0001, t);
-		g.gain.exponentialRampToValueAtTime(0.14, t + 0.01);
-		g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
-		o.connect(g);
-		g.connect(this.engine.musicBus);
-		o.start(t);
-		o.stop(t + 0.18);
+	dispose(): void {
+		if (this.currentBgm) {
+			this.currentBgm.pause();
+			this.currentBgm.currentTime = 0;
+		}
+		for (const audio of this.fadingOut) {
+			audio.pause();
+			audio.currentTime = 0;
+		}
+		this.fadingOut.length = 0;
+		for (const audio of this.bgmCache.values()) {
+			audio.pause();
+			audio.currentTime = 0;
+		}
+		this.bgmCache.clear();
+		this.currentBgm = null;
+		if (this.sfxCtx) void this.sfxCtx.close();
+		this.sfxCtx = null;
+		this.breakNoise = null;
 	}
 
-	private ensureEngine(): AudioEngine | null {
-		if (this.engine) return this.engine;
-		const Ctx =
+	private pickTrack(): BgmTrack {
+		if (this.currentBiomeId && TRACK_BY_BIOME[this.currentBiomeId]) {
+			return TRACK_BY_BIOME[this.currentBiomeId];
+		}
+		if (this.currentAmbience?.weatherPool.includes('snow')) return TRACK_SPACE;
+		if (this.currentAmbience?.weatherPool.includes('mist') && !this.currentAmbience.weatherPool.includes('rain')) {
+			return TRACK_DESERT;
+		}
+		return TRACK_FOREST;
+	}
+
+	private switchBgm(url: string, volume: number): void {
+		this.bgmTargetVolume = volume;
+		this.pendingBgm = { url, volume };
+		if (!this.unlocked) return;
+
+		const next = this.getBgm(url);
+		if (this.currentBgm === next) return;
+
+		if (this.currentBgm) this.fadingOut.push(this.currentBgm);
+		this.currentBgm = next;
+		this.currentBgm.currentTime = 0;
+		this.currentBgm.volume = 0;
+		if (!this.muted) void this.currentBgm.play().catch(() => {});
+	}
+
+	private getBgm(url: string): HTMLAudioElement {
+		const cached = this.bgmCache.get(url);
+		if (cached) return cached;
+		const audio = new Audio(url);
+		audio.loop = true;
+		audio.volume = 0;
+		audio.preload = 'auto';
+		this.bgmCache.set(url, audio);
+		return audio;
+	}
+
+	private ensureSfxContext(): AudioContext | null {
+		if (!this.unlocked || this.muted) return null;
+		const Ctor: typeof AudioContext | undefined =
 			window.AudioContext ??
 			(window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-		if (!Ctx) return null;
-		const ctx = new Ctx();
+		if (!Ctor) return null;
 
-		const master = ctx.createGain();
-		master.gain.value = this.muted ? 0.0001 : 0.75;
-		master.connect(ctx.destination);
+		if (!this.sfxCtx) {
+			this.sfxCtx = new Ctor();
+			const length = Math.floor(this.sfxCtx.sampleRate * 0.14);
+			this.breakNoise = this.sfxCtx.createBuffer(1, length, this.sfxCtx.sampleRate);
+			const data = this.breakNoise.getChannelData(0);
+			for (let i = 0; i < length; i++) {
+				const t = i / Math.max(1, length - 1);
+				const env = Math.pow(1 - t, 2.25);
+				data[i] = (Math.random() * 2 - 1) * env;
+			}
+		}
 
-		const musicBus = ctx.createGain();
-		musicBus.gain.value = 0.8;
-		musicBus.connect(master);
+		if (this.sfxCtx.state === 'suspended') void this.sfxCtx.resume().catch(() => {});
+		return this.sfxCtx;
+	}
+}
 
-		const sfxBus = ctx.createGain();
-		sfxBus.gain.value = 0.85;
-		sfxBus.connect(master);
-
-		const weatherBus = ctx.createGain();
-		weatherBus.gain.value = 0.52;
-		weatherBus.connect(master);
-
-		const noiseLen = Math.floor(ctx.sampleRate * 1.0);
-		const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
-		const data = noiseBuf.getChannelData(0);
-		for (let i = 0; i < noiseLen; i++) data[i] = (Math.random() * 2 - 1) * 0.9;
-
-		const musicOscA = ctx.createOscillator();
-		const musicOscB = ctx.createOscillator();
-		const musicGainA = ctx.createGain();
-		const musicGainB = ctx.createGain();
-		musicOscA.type = 'triangle';
-		musicOscB.type = 'sine';
-		musicOscA.frequency.value = this.music.root;
-		musicOscB.frequency.value = this.music.accent;
-		musicGainA.gain.value = 0.08;
-		musicGainB.gain.value = 0.06;
-		musicOscA.connect(musicGainA);
-		musicOscB.connect(musicGainB);
-		musicGainA.connect(musicBus);
-		musicGainB.connect(musicBus);
-		musicOscA.start();
-		musicOscB.start();
-
-		const weatherNoise = ctx.createBufferSource();
-		weatherNoise.buffer = noiseBuf;
-		weatherNoise.loop = true;
-		const weatherFilter = ctx.createBiquadFilter();
-		weatherFilter.type = 'bandpass';
-		weatherFilter.frequency.value = 1200;
-		weatherFilter.Q.value = 0.6;
-		const weatherGain = ctx.createGain();
-		weatherGain.gain.value = 0.0001;
-		weatherNoise.connect(weatherFilter);
-		weatherFilter.connect(weatherGain);
-		weatherGain.connect(weatherBus);
-		weatherNoise.start();
-
-		this.engine = {
-			ctx,
-			master,
-			musicBus,
-			sfxBus,
-			weatherBus,
-			noiseBuf,
-			musicOscA,
-			musicOscB,
-			musicGainA,
-			musicGainB,
-			weatherNoise,
-			weatherFilter,
-			weatherGain
-		};
-		this.setWeather(this.weather);
-		return this.engine;
+function classifyTone(typeKey: BlockType): SurfaceTone {
+	switch (typeKey) {
+		case 'stone':
+		case 'bedrock':
+		case 'brick':
+		case 'asphalt':
+			return 'stone';
+		case 'sand':
+			return 'sand';
+		case 'metal':
+			return 'metal';
+		case 'ice':
+		case 'water':
+			return 'glass';
+		default:
+			return 'earth';
 	}
 }

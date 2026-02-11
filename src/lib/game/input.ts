@@ -24,15 +24,19 @@ export class InputController {
 	keyDown(code: string): void {
 		switch (code) {
 			case 'KeyW':
+			case 'ArrowUp':
 				this.movement.forward = true;
 				return;
 			case 'KeyA':
+			case 'ArrowLeft':
 				this.movement.left = true;
 				return;
 			case 'KeyS':
+			case 'ArrowDown':
 				this.movement.backward = true;
 				return;
 			case 'KeyD':
+			case 'ArrowRight':
 				this.movement.right = true;
 				return;
 			case 'Space':
@@ -40,6 +44,8 @@ export class InputController {
 				return;
 			case 'ShiftLeft':
 			case 'ShiftRight':
+			case 'ControlLeft':
+			case 'ControlRight':
 				this.movement.descend = true;
 				return;
 			case 'Escape':
@@ -71,15 +77,19 @@ export class InputController {
 	keyUp(code: string): void {
 		switch (code) {
 			case 'KeyW':
+			case 'ArrowUp':
 				this.movement.forward = false;
 				break;
 			case 'KeyA':
+			case 'ArrowLeft':
 				this.movement.left = false;
 				break;
 			case 'KeyS':
+			case 'ArrowDown':
 				this.movement.backward = false;
 				break;
 			case 'KeyD':
+			case 'ArrowRight':
 				this.movement.right = false;
 				break;
 			case 'Space':
@@ -87,6 +97,8 @@ export class InputController {
 				break;
 			case 'ShiftLeft':
 			case 'ShiftRight':
+			case 'ControlLeft':
+			case 'ControlRight':
 				this.movement.descend = false;
 				break;
 		}

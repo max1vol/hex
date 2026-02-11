@@ -4,14 +4,22 @@ import { InputController } from '../../src/lib/game/input';
 describe('input controller', () => {
 	it('maps movement keys correctly', () => {
 		const input = new InputController();
-		input.keyDown('KeyW');
+		input.keyDown('ArrowUp');
+		input.keyDown('ArrowLeft');
 		input.keyDown('Space');
+		input.keyDown('ControlLeft');
 		expect(input.movement.forward).toBe(true);
+		expect(input.movement.left).toBe(true);
 		expect(input.movement.jump).toBe(true);
-		input.keyUp('KeyW');
+		expect(input.movement.descend).toBe(true);
+		input.keyUp('ArrowUp');
+		input.keyUp('ArrowLeft');
 		input.keyUp('Space');
+		input.keyUp('ControlLeft');
 		expect(input.movement.forward).toBe(false);
+		expect(input.movement.left).toBe(false);
 		expect(input.movement.jump).toBe(false);
+		expect(input.movement.descend).toBe(false);
 	});
 
 	it('tracks one-shot actions and palette selection', () => {

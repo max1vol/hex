@@ -59,15 +59,15 @@
 			</div>
 			<div id="panelBody">
 				<div id="kbd">
-					<div class="box">
-						<h2>Move</h2>
-						<ul>
-							<li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> run</li>
-							<li><kbd>Space</kbd> jump with gravity</li>
-							<li><kbd>Mouse</kbd> look (pointer lock)</li>
-							<li><kbd>F</kbd> toggle fast movement</li>
-						</ul>
-					</div>
+						<div class="box">
+							<h2>Move</h2>
+							<ul>
+								<li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>Arrow</kbd> keys run</li>
+								<li><kbd>Space</kbd> jump, <kbd>Shift</kbd>/<kbd>Ctrl</kbd> descend</li>
+								<li><kbd>Mouse</kbd> look (pointer lock)</li>
+								<li><kbd>F</kbd> toggle fast movement</li>
+							</ul>
+						</div>
 					<div class="box">
 						<h2>Build & Travel</h2>
 						<ul>
@@ -117,6 +117,7 @@
 		</div>
 		<div class="pad-row right">
 			<button data-move="jump">Jump</button>
+			<button data-move="descend">Down</button>
 			<button data-action="interact">Portal</button>
 		</div>
 	</div>
@@ -128,6 +129,11 @@
 		height: 100%;
 		margin: 0;
 		overflow: hidden;
+		overscroll-behavior: none;
+		touch-action: none;
+		user-select: none;
+		-webkit-user-select: none;
+		-webkit-touch-callout: none;
 		background:
 			radial-gradient(1000px 700px at 20% 10%, #1a2b7a 0%, rgba(26, 43, 122, 0.1) 45%, rgba(7, 10, 15, 0) 60%),
 			radial-gradient(900px 600px at 80% 0%, rgba(0, 174, 255, 0.22) 0%, rgba(0, 174, 255, 0) 60%),
@@ -142,6 +148,9 @@
 		--ink: rgba(240, 246, 255, 0.92);
 		--ink-dim: rgba(240, 246, 255, 0.68);
 		--danger: #ff4d6d;
+		width: 100vw;
+		height: 100vh;
+		touch-action: none;
 		color: var(--ink);
 		font-family:
 			ui-sans-serif,
@@ -159,6 +168,7 @@
 		display: block;
 		width: 100vw;
 		height: 100vh;
+		touch-action: none;
 	}
 
 	#overlay {
@@ -167,6 +177,7 @@
 		display: grid;
 		place-items: center;
 		padding: 24px;
+		touch-action: none;
 		background: radial-gradient(800px 600px at 50% 20%, rgba(5, 8, 20, 0.72), rgba(5, 8, 20, 0.9));
 		backdrop-filter: blur(8px);
 	}
@@ -450,6 +461,7 @@
 		inset: 0;
 		display: none;
 		place-items: center;
+		touch-action: none;
 		background: rgba(4, 9, 20, 0.7);
 		backdrop-filter: blur(6px);
 		z-index: 9;
@@ -487,6 +499,7 @@
 		background: rgba(255, 255, 255, 0.06);
 		color: white;
 		cursor: pointer;
+		touch-action: none;
 	}
 
 	.quiz-choices :global(.quiz-option:hover) {
@@ -519,6 +532,7 @@
 		color: white;
 		border-radius: 10px;
 		padding: 8px 10px;
+		touch-action: none;
 	}
 
 	#mobileControls {
@@ -529,6 +543,7 @@
 		gap: 4px;
 		z-index: 7;
 		user-select: none;
+		touch-action: none;
 	}
 
 	.pad-row {
@@ -549,6 +564,7 @@
 		background: rgba(7, 14, 28, 0.66);
 		color: #f1f7ff;
 		font-weight: 700;
+		touch-action: none;
 	}
 
 	@media (max-width: 760px) {

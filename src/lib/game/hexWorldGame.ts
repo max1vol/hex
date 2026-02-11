@@ -191,6 +191,7 @@ export class HexWorldGame implements DisposeBag {
 		delete window.hexworld_debug_action;
 
 		this.world.clear();
+		this.audio.dispose();
 		this.renderer.dispose();
 		this.geoBlock.dispose();
 	}
@@ -322,6 +323,10 @@ export class HexWorldGame implements DisposeBag {
 			target.addEventListener(type, handler, opts);
 			this.handlers.push(() => target.removeEventListener(type, handler, opts));
 		};
+		const passiveFalse = { passive: false };
+		const consumeTouch = (event: Event): void => {
+			if (event.cancelable) event.preventDefault();
+		};
 
 		add(document, 'pointerlockchange', () => {
 			this.pointerLocked = document.pointerLockElement === this.renderer.domElement;
@@ -333,12 +338,42 @@ export class HexWorldGame implements DisposeBag {
 
 		add(window, 'resize', () => this.onResize());
 		add(window, 'contextmenu', (e) => e.preventDefault());
+		add(document, 'selectstart', (e) => e.preventDefault());
+		add(document, 'gesturestart', consumeTouch, passiveFalse);
+		add(document, 'gesturechange', consumeTouch, passiveFalse);
+		add(document, 'gestureend', consumeTouch, passiveFalse);
 
-		add(this.el.cta, 'click', () => this.startGame());
-		add(this.el.overlay, 'click', (e) => {
-			if (e.target === this.el.overlay) this.startGame();
-		});
-		add(this.renderer.domElement, 'click', () => {
+		for (const target of [this.el.canvas, this.el.overlay, this.el.mobileControls, this.el.quizModal]) {
+			add(target, 'touchstart', consumeTouch, passiveFalse);
+			add(target, 'touchmove', consumeTouch, passiveFalse);
+			add(target, 'touchend', consumeTouch, passiveFalse);
+			add(target, 'touchcancel', consumeTouch, passiveFalse);
+		}
+
+		add(
+			this.el.cta,
+			'pointerdown',
+			(e) => {
+				const pe = e as PointerEvent;
+				if (pe.cancelable) pe.preventDefault();
+				this.startGame();
+			},
+			passiveFalse
+		);
+		add(
+			this.el.overlay,
+			'pointerdown',
+			(e) => {
+				const pe = e as PointerEvent;
+				if (pe.cancelable) pe.preventDefault();
+				if (pe.target === this.el.overlay) this.startGame();
+			},
+			passiveFalse
+		);
+		add(this.renderer.domElement, 'pointerdown', (e) => {
+			const pe = e as PointerEvent;
+			this.audio.unlock();
+			if (pe.pointerType === 'touch' && pe.cancelable) pe.preventDefault();
 			if (!this.inspect.enabled && !this.menuOpen && !this.quizOpen && !this.pointerLocked) this.lockPointer();
 		});
 
@@ -352,7 +387,7 @@ export class HexWorldGame implements DisposeBag {
 		add(window, 'keyup', (e) => this.onKeyUp(e as KeyboardEvent));
 		add(window, 'mousedown', (e) => this.onMouseDown(e as MouseEvent));
 
-		add(this.el.quizCancel, 'click', () => this.closeQuiz('Quiz cancelled.'));
+		add(this.el.quizCancel, 'pointerdown', () => this.closeQuiz('Quiz cancelled.'));
 
 		this.bindMobileControls(add);
 
@@ -368,19 +403,45 @@ export class HexWorldGame implements DisposeBag {
 			handler: EventListenerOrEventListenerObject,
 			opts?: AddEventListenerOptions | boolean
 		) => void
-	): void {
+		): void {
 		const buttons = this.el.mobileControls.querySelectorAll<HTMLButtonElement>('button[data-move]');
 		for (const btn of buttons) {
-			const moveKey = btn.dataset.move as 'forward' | 'backward' | 'left' | 'right' | 'jump' | undefined;
+			const moveKey = btn.dataset.move as 'forward' | 'backward' | 'left' | 'right' | 'jump' | 'descend' | undefined;
 			if (!moveKey) continue;
-			add(btn, 'pointerdown', () => this.input.setVirtualMovement({ [moveKey]: true }));
-			const up = () => this.input.setVirtualMovement({ [moveKey]: false });
+			add(
+				btn,
+				'pointerdown',
+				(e) => {
+					const pe = e as PointerEvent;
+					this.audio.unlock();
+					if (pe.cancelable) pe.preventDefault();
+					this.input.setVirtualMovement({ [moveKey]: true });
+				},
+				{ passive: false }
+			);
+			const up = (e: Event) => {
+				const pe = e as PointerEvent;
+				if (pe.cancelable) pe.preventDefault();
+				this.input.setVirtualMovement({ [moveKey]: false });
+			};
 			add(btn, 'pointerup', up);
 			add(btn, 'pointercancel', up);
 			add(btn, 'pointerleave', up);
 		}
 		const interact = this.el.mobileControls.querySelector<HTMLButtonElement>('button[data-action="interact"]');
-		if (interact) add(interact, 'click', () => this.tryInteractNearestPortal());
+		if (interact) {
+			add(
+				interact,
+				'pointerdown',
+				(e) => {
+					const pe = e as PointerEvent;
+					this.audio.unlock();
+					if (pe.cancelable) pe.preventDefault();
+					this.tryInteractNearestPortal();
+				},
+				{ passive: false }
+			);
+		}
 	}
 
 	private loadBiome(biomeId: string, fromPortal: boolean): void {
@@ -394,7 +455,7 @@ export class HexWorldGame implements DisposeBag {
 		this.createNpcs(data.npcSpawns);
 
 		this.applyBiomeAtmosphere(manifest, true);
-		this.audio.setBiomeAmbience(manifest.ambience);
+		this.audio.setBiomeAmbience(manifest.ambience, manifest.id);
 		this.rollWeather(true);
 		this.updateEraBanner();
 
@@ -558,6 +619,7 @@ export class HexWorldGame implements DisposeBag {
 			return;
 		}
 
+		this.audio.unlock();
 		this.input.keyDown(e.code);
 		this.processOneShotActions();
 
@@ -634,7 +696,15 @@ export class HexWorldGame implements DisposeBag {
 			const btn = document.createElement('button');
 			btn.className = 'quiz-option';
 			btn.textContent = question.options[i];
-			btn.addEventListener('click', () => this.answerQuiz(i));
+			btn.addEventListener(
+				'pointerdown',
+				(e) => {
+					const pe = e as PointerEvent;
+					if (pe.cancelable) pe.preventDefault();
+					this.answerQuiz(i);
+				},
+				{ passive: false }
+			);
 			this.el.quizChoices.appendChild(btn);
 		}
 
@@ -675,6 +745,8 @@ export class HexWorldGame implements DisposeBag {
 	private onMouseDown(e: MouseEvent): void {
 		if (this.menuOpen || this.inspect.enabled || this.quizOpen) return;
 		if (e.button !== 0 && e.button !== 2) return;
+		this.audio.unlock();
+		e.preventDefault();
 		if (!this.pointerLocked) {
 			this.lockPointer();
 			return;
@@ -1066,6 +1138,7 @@ export class HexWorldGame implements DisposeBag {
 
 	private startGame(): void {
 		if (this.inspect.enabled) return;
+		this.audio.unlock();
 		this.setMenu(false);
 		this.lockPointer();
 	}
