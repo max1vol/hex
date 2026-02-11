@@ -1,0 +1,1314 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Kelvin: Hex Blocks</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 6 56 20v24L32 58 8 44V20z' fill='%2346a85b'/%3E%3Cpath d='M32 30 8 20l24-14 24 14z' fill='%236ad47f'/%3E%3C/svg%3E" />
+    <style>
+      :root {
+        --bg0: #070a0f;
+        --bg1: #0c1330;
+        --ui: rgba(10, 14, 24, 0.72);
+        --ui2: rgba(10, 14, 24, 0.9);
+        --ink: rgba(240, 246, 255, 0.92);
+        --ink-dim: rgba(240, 246, 255, 0.68);
+        --accent: #ffd54a;
+        --danger: #ff4d6d;
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: radial-gradient(1000px 700px at 20% 10%, #1a2b7a 0%, rgba(26, 43, 122, 0.1) 45%, rgba(7, 10, 15, 0) 60%),
+          radial-gradient(900px 600px at 80% 0%, rgba(0, 174, 255, 0.22) 0%, rgba(0, 174, 255, 0) 60%),
+          linear-gradient(180deg, var(--bg1) 0%, var(--bg0) 60%, #03050a 100%);
+        color: var(--ink);
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+          "Segoe UI Emoji";
+      }
+
+      #c {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      #overlay {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: radial-gradient(800px 600px at 50% 20%, rgba(5, 8, 20, 0.72), rgba(5, 8, 20, 0.9));
+        backdrop-filter: blur(8px);
+      }
+
+      #panel {
+        width: min(820px, 96vw);
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: linear-gradient(180deg, rgba(10, 14, 24, 0.9), rgba(10, 14, 24, 0.65));
+        box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+        overflow: hidden;
+      }
+
+      #panelHeader {
+        padding: 18px 18px 14px 18px;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      #panelHeader h1 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: 0.2px;
+        font-weight: 700;
+      }
+
+      #panelHeader .sub {
+        margin: 0;
+        font-size: 12px;
+        color: var(--ink-dim);
+      }
+
+      #panelBody {
+        padding: 16px 18px 18px 18px;
+        display: grid;
+        gap: 12px;
+      }
+
+      #kbd {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .box {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 14px;
+        padding: 12px 12px;
+      }
+
+      .box h2 {
+        margin: 0 0 8px 0;
+        font-size: 12px;
+        color: var(--ink-dim);
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      kbd {
+        font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+
+      #ctaRow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-top: 2px;
+      }
+
+      #cta {
+        cursor: pointer;
+        border: 0;
+        border-radius: 12px;
+        padding: 10px 14px;
+        font-weight: 800;
+        color: #0b1022;
+        background: linear-gradient(180deg, #ffe183, #ffc944);
+        box-shadow: 0 12px 30px rgba(255, 213, 74, 0.25);
+      }
+
+      #hint {
+        font-size: 12px;
+        color: var(--ink-dim);
+      }
+
+      #hud {
+        position: absolute;
+        left: 14px;
+        top: 12px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        background: rgba(10, 14, 24, 0.45);
+        font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        color: rgba(240, 246, 255, 0.86);
+        user-select: none;
+        pointer-events: none;
+        display: none;
+        min-width: 250px;
+      }
+
+      #hud .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 2px 0;
+      }
+
+      #hud .label {
+        color: rgba(240, 246, 255, 0.66);
+      }
+
+      #hud .warn {
+        color: var(--danger);
+      }
+
+      #hotbar {
+        position: absolute;
+        left: 50%;
+        bottom: 14px;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(10, 14, 24, 0.50);
+        user-select: none;
+        pointer-events: none;
+        display: none;
+      }
+
+      .slot {
+        width: 46px;
+        height: 42px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.05);
+        display: grid;
+        place-items: center;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .slot .num {
+        position: absolute;
+        left: 6px;
+        top: 5px;
+        font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        color: rgba(240, 246, 255, 0.6);
+      }
+
+      .slot .swatch {
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+      }
+
+      .slot.active {
+        border-color: rgba(255, 213, 74, 0.75);
+        box-shadow: 0 0 0 2px rgba(255, 213, 74, 0.20);
+        background: rgba(255, 213, 74, 0.10);
+      }
+
+      #crosshair {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 18px;
+        height: 18px;
+        margin-left: -9px;
+        margin-top: -9px;
+        pointer-events: none;
+        display: none;
+      }
+
+      #crosshair::before,
+      #crosshair::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        background: rgba(240, 246, 255, 0.7);
+        border-radius: 2px;
+        transform: translate(-50%, -50%);
+        box-shadow: 0 0 18px rgba(255, 255, 255, 0.18);
+      }
+
+      #crosshair::before {
+        width: 2px;
+        height: 18px;
+      }
+
+      #crosshair::after {
+        width: 18px;
+        height: 2px;
+      }
+
+      #toast {
+        position: absolute;
+        right: 14px;
+        top: 12px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        background: rgba(10, 14, 24, 0.45);
+        font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        color: rgba(240, 246, 255, 0.86);
+        user-select: none;
+        pointer-events: none;
+        display: none;
+        max-width: min(520px, 92vw);
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+
+    <div id="overlay">
+      <div id="panel">
+        <div id="panelHeader">
+          <div>
+            <h1>Kelvin: Hex Blocks</h1>
+            <p class="sub">Minecraft-style builder, but every block is a vertical hex prism.</p>
+          </div>
+          <p class="sub">Three.js + pointer lock</p>
+        </div>
+        <div id="panelBody">
+          <div id="kbd">
+            <div class="box">
+              <h2>Move</h2>
+              <ul>
+                <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> strafe</li>
+                <li><kbd>Space</kbd> up, <kbd>Shift</kbd> down (creative fly)</li>
+                <li><kbd>Mouse</kbd> look (pointer lock)</li>
+              </ul>
+            </div>
+            <div class="box">
+              <h2>Build</h2>
+              <ul>
+                <li><kbd>LMB</kbd> remove block</li>
+                <li><kbd>RMB</kbd> place block</li>
+                <li><kbd>1</kbd>-<kbd>4</kbd> select material</li>
+                <li><kbd>R</kbd> regenerate world</li>
+              </ul>
+            </div>
+          </div>
+          <div id="ctaRow">
+            <button id="cta">Click to Play</button>
+            <div id="hint">
+              If imports fail via <code>file://</code>, run: <code>python3 -m http.server</code> and open
+              <code>http://localhost:8000/kelvin.html</code>.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="hud"></div>
+    <div id="toast"></div>
+    <div id="crosshair"></div>
+    <div id="hotbar"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script>
+      (() => {
+        "use strict";
+
+        const $ = (sel) => document.querySelector(sel);
+
+        const canvas = $("#c");
+        const overlay = $("#overlay");
+        const cta = $("#cta");
+        const hud = $("#hud");
+        const toast = $("#toast");
+        const crosshair = $("#crosshair");
+        const hotbar = $("#hotbar");
+
+	        const THREE = window.THREE;
+	        if (!THREE) {
+	          overlay.style.display = "grid";
+	          $("#hint").textContent = "Three.js failed to load. Check network access.";
+	          return;
+	        }
+
+	        const URL_PARAMS = (() => {
+	          try {
+	            return new URLSearchParams(location.search);
+	          } catch (_) {
+	            return new URLSearchParams();
+	          }
+	        })();
+	        const INSPECT_MODE = URL_PARAMS.get("inspect") === "1";
+	        const INSPECT_TYPE = (URL_PARAMS.get("type") || "grass").toLowerCase();
+	        const INSPECT_ANGLE0 = Number.parseFloat(URL_PARAMS.get("angle") || "0") || 0;
+	        const INSPECT_SPIN = URL_PARAMS.get("spin") === "1";
+	        const INSPECT_UI = URL_PARAMS.get("ui") === "1";
+	        const INSPECT_DIST = Number.parseFloat(URL_PARAMS.get("dist") || "4.8") || 4.8;
+	        const INSPECT_HEIGHT = Number.parseFloat(URL_PARAMS.get("height") || "2.4") || 2.4;
+
+        const HEX_RADIUS = 1.0; // circumradius (center to corner)
+        const BLOCK_H = 1.0;
+        const MAX_Y = 48;
+        const WORLD_RADIUS = 18;
+        const STEP_ACROSS_SIDE = Math.sqrt(3) * HEX_RADIUS; // center-to-center across a hex side
+
+        const EPS = 1e-4;
+        const tmpVec3 = new THREE.Vector3();
+        const tmpVec3b = new THREE.Vector3();
+        const tmpMat3 = new THREE.Matrix3();
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x97b6d3);
+        scene.fog = new THREE.FogExp2(0x9db6d2, 0.030);
+
+        const renderer = new THREE.WebGLRenderer({
+          canvas,
+          antialias: true,
+          powerPreference: "high-performance",
+        });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight, false);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 500);
+
+        // Simple pointer-lock FPS rig (yaw object + pitch object + camera)
+        const yawObject = new THREE.Object3D();
+        const pitchObject = new THREE.Object3D();
+        pitchObject.add(camera);
+        yawObject.add(pitchObject);
+        scene.add(yawObject);
+
+        // Lighting
+        const hemi = new THREE.HemisphereLight(0xe6f0ff, 0x95a6bf, 1.18);
+        scene.add(hemi);
+        const sun = new THREE.DirectionalLight(0xffffff, 0.95);
+        sun.position.set(18, 30, 10);
+        sun.castShadow = false;
+        scene.add(sun);
+        const fill = new THREE.DirectionalLight(0xd8e8ff, 0.88);
+        fill.position.set(-16, 18, -20);
+        fill.castShadow = false;
+        scene.add(fill);
+
+        const blockGroup = new THREE.Group();
+        scene.add(blockGroup);
+
+	        const geoBlock = new THREE.CylinderGeometry(HEX_RADIUS, HEX_RADIUS, BLOCK_H, 6, 1, false);
+	        // Rotate so a face normal aligns to +X (nice for intuition).
+	        geoBlock.rotateY(Math.PI / 6);
+
+	        // Materials (textures are loaded asynchronously and wired in below; colors are fallbacks).
+	        const matDirt = new THREE.MeshStandardMaterial({ color: 0x7a5c3a, roughness: 0.98, metalness: 0.0 });
+	        const matGrassTop = new THREE.MeshStandardMaterial({ color: 0x3aa35b, roughness: 0.92, metalness: 0.0 });
+	        const matGrassSide = new THREE.MeshStandardMaterial({ color: 0x6e5a3f, roughness: 0.95, metalness: 0.0 });
+	        const matStone = new THREE.MeshStandardMaterial({ color: 0x8c9098, roughness: 0.92, metalness: 0.0 });
+	        const matSand = new THREE.MeshStandardMaterial({ color: 0xe8d9a6, roughness: 0.95, metalness: 0.0 });
+
+	        // CylinderGeometry groups: sides (0), top (1), bottom (2)
+	        const mats = {
+	          grass: [matGrassSide, matGrassTop, matDirt],
+	          dirt: [matDirt, matDirt, matDirt],
+	          stone: [matStone, matStone, matStone],
+	          sand: [matSand, matSand, matSand],
+	        };
+
+	        const palette = [
+	          { key: "grass", label: "Grass", color: 0x3aa35b, tex: "textures/grass_top.png" },
+	          { key: "dirt", label: "Dirt", color: 0x7a5c3a, tex: "textures/dirt.png" },
+	          { key: "stone", label: "Stone", color: 0x8c9098, tex: "textures/stone.png" },
+	          { key: "sand", label: "Sand", color: 0xe8d9a6, tex: "textures/sand.png" },
+	        ];
+
+	        function buildHotbar() {
+	          hotbar.innerHTML = "";
+	          palette.forEach((p, i) => {
+            const slot = document.createElement("div");
+            slot.className = "slot";
+            slot.dataset.idx = String(i);
+
+            const num = document.createElement("div");
+            num.className = "num";
+            num.textContent = String(i + 1);
+            slot.appendChild(num);
+
+	            const swatch = document.createElement("div");
+	            swatch.className = "swatch";
+	            swatch.style.background = "#" + p.color.toString(16).padStart(6, "0");
+	            if (p.tex) {
+	              swatch.style.backgroundImage = `url(${p.tex})`;
+	              swatch.style.backgroundSize = "cover";
+	              swatch.style.backgroundPosition = "center";
+	            }
+	            slot.appendChild(swatch);
+
+	            hotbar.appendChild(slot);
+	          });
+	        }
+	        buildHotbar();
+
+        let selectedPaletteIdx = 0;
+        function updateHotbar() {
+          const slots = hotbar.querySelectorAll(".slot");
+          slots.forEach((el) => el.classList.toggle("active", Number(el.dataset.idx) === selectedPaletteIdx));
+        }
+        updateHotbar();
+
+        function axialToWorld(q, r) {
+          // Flat-top axial coords
+          const x = HEX_RADIUS * (3 / 2) * q;
+          const z = HEX_RADIUS * Math.sqrt(3) * (r + q / 2);
+          return { x, z };
+        }
+
+        function axialRound(q, r) {
+          // Convert axial -> cube, round, then back (Red Blob Games)
+          let x = q;
+          let z = r;
+          let y = -x - z;
+
+          let rx = Math.round(x);
+          let ry = Math.round(y);
+          let rz = Math.round(z);
+
+          const dx = Math.abs(rx - x);
+          const dy = Math.abs(ry - y);
+          const dz = Math.abs(rz - z);
+
+          if (dx > dy && dx > dz) rx = -ry - rz;
+          else if (dy > dz) ry = -rx - rz;
+          else rz = -rx - ry;
+
+          return { q: rx, r: rz };
+        }
+
+        function worldToAxial(x, z) {
+          const q = (2 / 3) * (x / HEX_RADIUS);
+          const r = z / (Math.sqrt(3) * HEX_RADIUS) - q / 2;
+          return axialRound(q, r);
+        }
+
+        function hexDist(q1, r1, q2, r2) {
+          const dq = q2 - q1;
+          const dr = r2 - r1;
+          // cube distance = (|x| + |y| + |z|) / 2, with y = -x - z
+          const x = dq;
+          const z = dr;
+          const y = -x - z;
+          return (Math.abs(x) + Math.abs(y) + Math.abs(z)) / 2;
+        }
+
+	        function hash2(q, r) {
+	          // Deterministic-ish 2D hash -> [0,1)
+	          const s = Math.sin(q * 127.1 + r * 311.7) * 43758.5453123;
+	          return s - Math.floor(s);
+	        }
+
+	        // Texture loading (Nano Banana outputs live in ./textures/)
+	        const texPaths = {
+	          grass_top: "textures/grass_top.png",
+	          grass_side: "textures/grass_side.png",
+	          dirt: "textures/dirt.png",
+	          stone: "textures/stone.png",
+	          sand: "textures/sand.png",
+	        };
+	        let grassTopTex = null;
+	        let grassSideTex = null;
+
+	        function configureTex(tex, opts = {}) {
+	          tex.colorSpace = THREE.SRGBColorSpace;
+	          tex.wrapS = opts.wrapS ?? THREE.ClampToEdgeWrapping;
+	          tex.wrapT = opts.wrapT ?? THREE.ClampToEdgeWrapping;
+	          const rx = typeof opts.repeatX === "number" ? opts.repeatX : 1;
+	          const ry = typeof opts.repeatY === "number" ? opts.repeatY : 1;
+	          tex.repeat.set(rx, ry);
+	          if (opts.minFilter) tex.minFilter = opts.minFilter;
+	          if (opts.magFilter) tex.magFilter = opts.magFilter;
+	          if (typeof opts.generateMipmaps === "boolean") tex.generateMipmaps = opts.generateMipmaps;
+	          tex.anisotropy = Math.min(10, renderer.capabilities.getMaxAnisotropy());
+	          tex.needsUpdate = true;
+	          return tex;
+	        }
+
+		        function loadTexture(url, opts) {
+		          return new Promise((resolve, reject) => {
+		            new THREE.TextureLoader().load(
+		              url,
+		              (tex) => resolve(configureTex(tex, opts)),
+		              undefined,
+		              (err) => reject(err || new Error("Failed to load " + url))
+		            );
+		          });
+		        }
+
+	        // Load textures in the background and wire them into existing shared materials.
+	        (async () => {
+	          try {
+	            const [tGrassTop, tGrassSide, tDirt, tStone, tSand] = await Promise.all([
+	              loadTexture(texPaths.grass_top, { wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping }),
+	              loadTexture(texPaths.grass_side, {
+	                wrapS: THREE.RepeatWrapping,
+	                wrapT: THREE.ClampToEdgeWrapping,
+	                minFilter: THREE.LinearFilter,
+	                magFilter: THREE.LinearFilter,
+	                generateMipmaps: false,
+	              }),
+	              loadTexture(texPaths.dirt, { wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping }),
+	              loadTexture(texPaths.stone, { wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping }),
+	              loadTexture(texPaths.sand, { wrapS: THREE.ClampToEdgeWrapping, wrapT: THREE.ClampToEdgeWrapping }),
+	            ]);
+
+	            matGrassTop.map = tGrassTop;
+	            matGrassSide.map = tGrassSide;
+	            matDirt.map = tDirt;
+	            matStone.map = tStone;
+	            matSand.map = tSand;
+	            grassTopTex = tGrassTop;
+	            grassSideTex = tGrassSide;
+
+	            matGrassTop.color.set(0xffffff);
+	            matGrassSide.color.set(0xffffff);
+	            matDirt.color.set(0xffffff);
+	            matStone.color.set(0xffffff);
+	            matSand.color.set(0xffffff);
+
+	            matGrassTop.needsUpdate = true;
+	            matGrassSide.needsUpdate = true;
+	            matDirt.needsUpdate = true;
+	            matStone.needsUpdate = true;
+	            matSand.needsUpdate = true;
+	          } catch (err) {
+	            console.warn("Texture load failed:", err);
+	            showToast("Textures failed to load. If using file://, try http://localhost:8000.", 3200);
+	          }
+	        })();
+
+	        function fbm(q, r) {
+	          // Tiny fake-FBM: sum a few octaves of hashed lattice with smoothing.
+	          let f = 0;
+	          let amp = 0.55;
+          let freq = 0.19;
+          let norm = 0;
+          for (let i = 0; i < 4; i++) {
+            const x = q * freq;
+            const y = r * freq;
+            const x0 = Math.floor(x);
+            const y0 = Math.floor(y);
+            const tx = x - x0;
+            const ty = y - y0;
+
+            const a = hash2(x0, y0);
+            const b = hash2(x0 + 1, y0);
+            const c = hash2(x0, y0 + 1);
+            const d = hash2(x0 + 1, y0 + 1);
+            const sx = tx * tx * (3 - 2 * tx);
+            const sy = ty * ty * (3 - 2 * ty);
+            const lerp1 = a + (b - a) * sx;
+            const lerp2 = c + (d - c) * sx;
+            const v = lerp1 + (lerp2 - lerp1) * sy; // [0,1)
+
+            f += v * amp;
+            norm += amp;
+            amp *= 0.5;
+            freq *= 2.0;
+          }
+          return f / Math.max(EPS, norm);
+        }
+
+        class World {
+          constructor(group) {
+            this.group = group;
+            /** @type {Map<string, THREE.Mesh>} */
+            this.blocks = new Map();
+          }
+
+          key(q, r, y) {
+            return q + "," + r + "," + y;
+          }
+
+          has(q, r, y) {
+            return this.blocks.has(this.key(q, r, y));
+          }
+
+          get(q, r, y) {
+            return this.blocks.get(this.key(q, r, y)) || null;
+          }
+
+          add(q, r, y, typeKey) {
+            if (y < 0 || y > MAX_Y) return false;
+            const k = this.key(q, r, y);
+            if (this.blocks.has(k)) return false;
+
+            const pos = axialToWorld(q, r);
+            const mesh = new THREE.Mesh(geoBlock, mats[typeKey] || mats.dirt);
+            mesh.position.set(pos.x, (y + 0.5) * BLOCK_H, pos.z);
+            mesh.userData = { q, r, y, typeKey, isBlock: true };
+            mesh.frustumCulled = true;
+            this.group.add(mesh);
+            this.blocks.set(k, mesh);
+            return true;
+          }
+
+          remove(q, r, y) {
+            const k = this.key(q, r, y);
+            const mesh = this.blocks.get(k);
+            if (!mesh) return false;
+            this.group.remove(mesh);
+            this.blocks.delete(k);
+            return true;
+          }
+
+          clear() {
+            for (const mesh of this.blocks.values()) this.group.remove(mesh);
+            this.blocks.clear();
+          }
+        }
+
+        const world = new World(blockGroup);
+
+	        function generateWorld() {
+	          world.clear();
+
+          // Start position.
+          const start = axialToWorld(0, 0);
+          yawObject.position.set(start.x, 10, start.z);
+          yawObject.rotation.set(0, 0, 0);
+          pitchObject.rotation.set(0, 0, 0);
+
+          const seedQ = Math.floor(Math.random() * 10000) - 5000;
+          const seedR = Math.floor(Math.random() * 10000) - 5000;
+
+          for (let q = -WORLD_RADIUS; q <= WORLD_RADIUS; q++) {
+            for (let r = -WORLD_RADIUS; r <= WORLD_RADIUS; r++) {
+              const d = hexDist(0, 0, q, r);
+              if (d > WORLD_RADIUS) continue;
+
+              const falloff = Math.max(0, 1 - d / (WORLD_RADIUS + 0.001));
+              const n = fbm(q + seedQ, r + seedR);
+              const ridge = Math.pow(Math.abs(n - 0.5) * 2, 0.65);
+              const hRaw = (0.35 + 0.65 * n) * (1.0 - 0.25 * ridge);
+              let h = 1 + Math.floor(falloff * (3 + hRaw * 9));
+              h = Math.max(1, Math.min(h, 12));
+
+              // Sparse sandy patches near edges.
+              const sandy = falloff < 0.35 && hash2(q * 2 + seedQ, r * 2 + seedR) > 0.45;
+
+              for (let y = 0; y < h; y++) {
+                const top = y === h - 1;
+                const deep = y < h - 3;
+                let typeKey = "dirt";
+                if (deep) typeKey = "stone";
+                else if (top) typeKey = sandy ? "sand" : "grass";
+                else typeKey = sandy ? "sand" : "dirt";
+                world.add(q, r, y, typeKey);
+              }
+            }
+          }
+
+          // A small "spire" at spawn to show vertical stacking clearly.
+          for (let y = 1; y <= 7; y++) world.add(0, 0, y, "stone");
+	          world.add(0, 0, 8, "grass");
+	        }
+
+	        let inspectAngle = INSPECT_ANGLE0;
+	        function normalizeBlockType(t) {
+	          const tt = String(t || "").toLowerCase();
+	          if (tt === "grass" || tt === "dirt" || tt === "stone" || tt === "sand") return tt;
+	          return "grass";
+	        }
+
+	        function applyInspectCamera(angleDeg) {
+	          const a = (angleDeg * Math.PI) / 180;
+	          const cx = Math.cos(a) * INSPECT_DIST;
+	          const cz = Math.sin(a) * INSPECT_DIST;
+	          const cy = INSPECT_HEIGHT;
+
+	          yawObject.position.set(cx, cy, cz);
+
+	          const tx = 0;
+	          const ty = 0.5 * BLOCK_H;
+	          const tz = 0;
+	          const dx = tx - cx;
+	          const dy = ty - cy;
+	          const dz = tz - cz;
+	          const len = Math.max(EPS, Math.hypot(dx, dy, dz));
+	          const ndx = dx / len;
+	          const ndy = dy / len;
+	          const ndz = dz / len;
+
+	          const pitch = Math.asin(Math.max(-1, Math.min(1, ndy)));
+	          // yaw=0 looks toward -Z; align that with the target direction projected on XZ.
+	          const yaw = Math.atan2(-ndx, -ndz);
+	          yawObject.rotation.y = yaw;
+	          pitchObject.rotation.x = pitch;
+	        }
+
+	        function setupInspect() {
+	          world.clear();
+	          const t = normalizeBlockType(INSPECT_TYPE);
+	          // One block at origin, camera orbits around it.
+	          world.add(0, 0, 0, t);
+	          scene.fog = null;
+	          applyInspectCamera(inspectAngle);
+	        }
+
+	        if (INSPECT_MODE) setupInspect();
+	        else generateWorld();
+
+	        const highlightMat = new THREE.MeshBasicMaterial({ color: 0xffd54a, wireframe: true, transparent: true, opacity: 0.9 });
+	        const highlight = new THREE.Mesh(geoBlock, highlightMat);
+	        highlight.visible = false;
+	        scene.add(highlight);
+
+	        const raycaster = new THREE.Raycaster();
+	        raycaster.far = 18;
+
+	        let menuOpen = true;
+	        let pointerLocked = false;
+	        let lastToastAt = 0;
+	        let muted = false;
+
+	        // Simple WebAudio SFX (no external files; tuned for satisfying build/break feedback).
+	        let audio = null;
+	        function ensureAudio() {
+	          if (audio) return audio;
+	          const Ctx = window.AudioContext || window.webkitAudioContext;
+	          if (!Ctx) return null;
+	          const ctx = new Ctx();
+	          const master = ctx.createGain();
+	          master.gain.value = 0.55;
+	          master.connect(ctx.destination);
+
+	          const noiseLen = Math.floor(ctx.sampleRate * 1.0);
+	          const noiseBuf = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+	          const data = noiseBuf.getChannelData(0);
+	          for (let i = 0; i < noiseLen; i++) data[i] = (Math.random() * 2 - 1) * 0.9;
+
+	          audio = { ctx, master, noiseBuf };
+	          return audio;
+	        }
+
+	        function playPlace(typeKey) {
+	          if (muted) return;
+	          const a = ensureAudio();
+	          if (!a) return;
+	          const { ctx, master, noiseBuf } = a;
+	          if (ctx.state === "suspended") ctx.resume();
+	          const t = ctx.currentTime;
+
+	          const tone = ctx.createOscillator();
+	          const toneGain = ctx.createGain();
+	          const toneFilter = ctx.createBiquadFilter();
+	          tone.type = "triangle";
+
+	          let base = 220;
+	          if (typeKey === "stone") base = 180;
+	          if (typeKey === "sand") base = 260;
+	          if (typeKey === "grass") base = 240;
+	          base *= 1.0 + (Math.random() * 0.08 - 0.04);
+
+	          tone.frequency.setValueAtTime(base, t);
+	          tone.frequency.exponentialRampToValueAtTime(Math.max(60, base * 0.55), t + 0.07);
+	          toneFilter.type = "lowpass";
+	          toneFilter.frequency.setValueAtTime(9000, t);
+	          toneFilter.frequency.exponentialRampToValueAtTime(2200, t + 0.06);
+
+	          toneGain.gain.setValueAtTime(0.0001, t);
+	          toneGain.gain.exponentialRampToValueAtTime(0.22, t + 0.005);
+	          toneGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.10);
+
+	          tone.connect(toneFilter);
+	          toneFilter.connect(toneGain);
+	          toneGain.connect(master);
+	          tone.start(t);
+	          tone.stop(t + 0.11);
+
+	          const n = ctx.createBufferSource();
+	          n.buffer = noiseBuf;
+	          const nGain = ctx.createGain();
+	          const nFilter = ctx.createBiquadFilter();
+	          nFilter.type = "bandpass";
+	          nFilter.frequency.setValueAtTime(typeKey === "sand" ? 1100 : 1900, t);
+	          nFilter.Q.setValueAtTime(typeKey === "stone" ? 0.9 : 0.7, t);
+
+	          nGain.gain.setValueAtTime(0.0001, t);
+	          nGain.gain.exponentialRampToValueAtTime(typeKey === "stone" ? 0.10 : 0.07, t + 0.004);
+	          nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.035);
+
+	          n.connect(nFilter);
+	          nFilter.connect(nGain);
+	          nGain.connect(master);
+	          n.start(t);
+	          n.stop(t + 0.04);
+	        }
+
+	        function playBreak(typeKey) {
+	          if (muted) return;
+	          const a = ensureAudio();
+	          if (!a) return;
+	          const { ctx, master, noiseBuf } = a;
+	          if (ctx.state === "suspended") ctx.resume();
+	          const t = ctx.currentTime;
+
+	          // Crunch layer
+	          const n = ctx.createBufferSource();
+	          n.buffer = noiseBuf;
+	          const nGain = ctx.createGain();
+	          const nFilter = ctx.createBiquadFilter();
+	          nFilter.type = "bandpass";
+	          const f0 = typeKey === "stone" ? 1800 : typeKey === "sand" ? 900 : 1400;
+	          const f1 = typeKey === "stone" ? 700 : typeKey === "sand" ? 420 : 540;
+	          nFilter.frequency.setValueAtTime(f0, t);
+	          nFilter.frequency.exponentialRampToValueAtTime(f1, t + 0.16);
+	          nFilter.Q.setValueAtTime(typeKey === "stone" ? 1.15 : 0.9, t);
+
+	          nGain.gain.setValueAtTime(0.0001, t);
+	          nGain.gain.exponentialRampToValueAtTime(typeKey === "stone" ? 0.34 : 0.26, t + 0.010);
+	          nGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.20);
+
+	          n.connect(nFilter);
+	          nFilter.connect(nGain);
+	          nGain.connect(master);
+	          n.start(t);
+	          n.stop(t + 0.22);
+
+	          // Thud layer
+	          const th = ctx.createOscillator();
+	          const thGain = ctx.createGain();
+	          th.type = typeKey === "stone" ? "sine" : "triangle";
+	          const th0 = (typeKey === "stone" ? 92 : typeKey === "sand" ? 70 : 80) * (1.0 + (Math.random() * 0.06 - 0.03));
+	          th.frequency.setValueAtTime(th0, t);
+	          th.frequency.exponentialRampToValueAtTime(Math.max(32, th0 * 0.55), t + 0.14);
+
+	          thGain.gain.setValueAtTime(0.0001, t);
+	          thGain.gain.exponentialRampToValueAtTime(typeKey === "stone" ? 0.22 : 0.18, t + 0.012);
+	          thGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.17);
+
+	          th.connect(thGain);
+	          thGain.connect(master);
+	          th.start(t);
+	          th.stop(t + 0.19);
+
+	          // Leafy tick for grass
+	          if (typeKey === "grass") {
+	            const t2 = t + 0.01;
+	            const nn = ctx.createBufferSource();
+	            nn.buffer = noiseBuf;
+	            const g = ctx.createGain();
+	            const hp = ctx.createBiquadFilter();
+	            hp.type = "highpass";
+	            hp.frequency.setValueAtTime(2200, t2);
+	            g.gain.setValueAtTime(0.0001, t2);
+	            g.gain.exponentialRampToValueAtTime(0.06, t2 + 0.005);
+	            g.gain.exponentialRampToValueAtTime(0.0001, t2 + 0.045);
+	            nn.connect(hp);
+	            hp.connect(g);
+	            g.connect(master);
+	            nn.start(t2);
+	            nn.stop(t2 + 0.05);
+	          }
+	        }
+
+	        function showToast(msg, ms = 1800) {
+	          const now = performance.now();
+	          lastToastAt = now;
+	          toast.textContent = msg;
+          toast.style.display = "block";
+          setTimeout(() => {
+            if (performance.now() - lastToastAt >= ms - 20) toast.style.display = "none";
+          }, ms);
+	        }
+
+	        function lockPointer() {
+	          if (INSPECT_MODE) return;
+	          const el = renderer.domElement;
+	          if (document.pointerLockElement) return;
+	          try {
+	            const p = el.requestPointerLock();
+	            if (p && typeof p.catch === "function") {
+	              p.catch((err) => {
+	                const name = err && err.name ? err.name : "Error";
+	                showToast(`Pointer lock unavailable (${name}). Running unlocked.`, 2400);
+	              });
+	            }
+	          } catch (err) {
+	            const name = err && err.name ? err.name : "Error";
+	            showToast(`Pointer lock unavailable (${name}). Running unlocked.`, 2400);
+	          }
+	        }
+
+	        function setMenu(open) {
+	          menuOpen = open;
+	          overlay.style.display = open ? "grid" : "none";
+	          hud.style.display = open ? "none" : "block";
+	          hotbar.style.display = open ? "none" : "flex";
+	          crosshair.style.display = open ? "none" : "block";
+
+	          if (open) {
+	            // Stop movement when menu opens.
+	            for (const k of Object.keys(keys)) keys[k] = false;
+	          }
+	        }
+
+	        document.addEventListener("pointerlockchange", () => {
+	          pointerLocked = document.pointerLockElement === renderer.domElement;
+	          if (!pointerLocked && !menuOpen) showToast("Mouse unlocked. Click to re-lock.", 1800);
+	        });
+
+	        function startGame() {
+	          setMenu(false);
+	          lockPointer();
+	        }
+
+	        cta.addEventListener("click", startGame);
+	        overlay.addEventListener("click", (e) => {
+	          // Click anywhere in overlay to play, but don't steal clicks from the panel.
+	          if (e.target === overlay) startGame();
+	        });
+
+	        // Look controls
+	        const LOOK_SENS = 0.0022;
+	        document.addEventListener("mousemove", (e) => {
+	          if (menuOpen) return;
+	          yawObject.rotation.y -= e.movementX * LOOK_SENS;
+	          pitchObject.rotation.x -= e.movementY * LOOK_SENS;
+	          pitchObject.rotation.x = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, pitchObject.rotation.x));
+	        });
+
+        // Movement
+        const keys = {
+          w: false,
+          a: false,
+          s: false,
+          d: false,
+          space: false,
+          shift: false,
+        };
+
+        let speed = 8.5;
+	        let fast = false;
+
+        function setKey(e, down) {
+          switch (e.code) {
+            case "KeyW":
+              keys.w = down;
+              break;
+            case "KeyA":
+              keys.a = down;
+              break;
+            case "KeyS":
+              keys.s = down;
+              break;
+            case "KeyD":
+              keys.d = down;
+              break;
+            case "Space":
+              keys.space = down;
+              break;
+            case "ShiftLeft":
+            case "ShiftRight":
+              keys.shift = down;
+              break;
+          }
+        }
+
+	        window.addEventListener("keydown", (e) => {
+	          if (e.code === "Escape") {
+	            if (!menuOpen) {
+	              setMenu(true);
+	              if (document.pointerLockElement) document.exitPointerLock();
+	            } else {
+	              startGame();
+	            }
+	            return;
+	          }
+	          if (e.code === "KeyM" && !menuOpen) {
+	            muted = !muted;
+	            showToast(muted ? "Sound: muted" : "Sound: on", 900);
+	            return;
+	          }
+	          if (e.code === "Enter" && menuOpen) {
+	            startGame();
+	            return;
+	          }
+	          if (menuOpen) return;
+	          setKey(e, true);
+
+	          if (e.code === "KeyR") {
+	            if (INSPECT_MODE) {
+	              setupInspect();
+	              showToast("Inspect reset");
+	            } else {
+	              generateWorld();
+	              showToast("World regenerated");
+	            }
+	          }
+          if (e.code === "KeyF") {
+            fast = !fast;
+            showToast(fast ? "Speed: FAST" : "Speed: normal");
+          }
+
+          if (e.code.startsWith("Digit")) {
+            const n = Number(e.code.replace("Digit", ""));
+            if (n >= 1 && n <= palette.length) {
+              selectedPaletteIdx = n - 1;
+              updateHotbar();
+              showToast("Selected: " + palette[selectedPaletteIdx].label, 900);
+            }
+          }
+        });
+
+        window.addEventListener("keyup", (e) => {
+          setKey(e, false);
+        });
+
+        window.addEventListener("contextmenu", (e) => e.preventDefault());
+
+        function computeWorldNormal(hit) {
+          // hit.face.normal is in local space; bring into world space.
+          tmpMat3.getNormalMatrix(hit.object.matrixWorld);
+          return hit.face.normal.clone().applyMatrix3(tmpMat3).normalize();
+        }
+
+        function neighborForPlacement(hit, worldNormal) {
+          const ud = hit.object.userData || {};
+          const q = ud.q | 0;
+          const r = ud.r | 0;
+          const y = ud.y | 0;
+
+          if (Math.abs(worldNormal.y) > 0.85) {
+            return { q, r, y: y + (worldNormal.y > 0 ? 1 : -1) };
+          }
+
+          // Step from block center outward along the side normal and round back to axial coords.
+          tmpVec3.set(worldNormal.x, 0, worldNormal.z);
+          if (tmpVec3.lengthSq() < 1e-6) return { q, r, y };
+          tmpVec3.normalize().multiplyScalar(STEP_ACROSS_SIDE * 0.98);
+          const cx = hit.object.position.x + tmpVec3.x;
+          const cz = hit.object.position.z + tmpVec3.z;
+          const ax = worldToAxial(cx, cz);
+          return { q: ax.q, r: ax.r, y };
+        }
+
+	        function canEdit() {
+	          return !menuOpen && !INSPECT_MODE;
+	        }
+
+	        function removeSelected(hit) {
+	          const ud = hit.object.userData || {};
+	          if (!ud.isBlock) return;
+	          if (world.remove(ud.q | 0, ud.r | 0, ud.y | 0)) playBreak(ud.typeKey || "dirt");
+	        }
+
+	        function placeAdjacent(hit, worldNormal) {
+	          const n = neighborForPlacement(hit, worldNormal);
+	          if (n.y < 0 || n.y > MAX_Y) return;
+	          if (world.has(n.q, n.r, n.y)) return;
+	          const typeKey = palette[selectedPaletteIdx]?.key || "dirt";
+	          if (world.add(n.q, n.r, n.y, typeKey)) playPlace(typeKey);
+	        }
+
+	        window.addEventListener("mousedown", (e) => {
+	          if (menuOpen) return;
+	          if (!canEdit()) return;
+	          if (e.button !== 0 && e.button !== 2) return;
+
+          const hit = pickBlock();
+          if (!hit) return;
+          const wN = hit.worldNormal;
+
+          if (e.button === 0) {
+            removeSelected(hit);
+          } else if (e.button === 2) {
+            placeAdjacent(hit, wN);
+          }
+        });
+
+        function pickBlock() {
+          raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+          const hits = raycaster.intersectObjects(blockGroup.children, false);
+          if (!hits.length) return null;
+          const hit = hits[0];
+          if (!hit.face) return null;
+          const wN = computeWorldNormal(hit);
+          hit.worldNormal = wN;
+          return hit;
+        }
+
+	        function updateHighlight() {
+	          if (INSPECT_MODE) {
+	            highlight.visible = false;
+	            return null;
+	          }
+	          const hit = pickBlock();
+	          if (!hit) {
+	            highlight.visible = false;
+	            return null;
+	          }
+          highlight.visible = true;
+          highlight.position.copy(hit.object.position);
+          highlight.rotation.copy(hit.object.rotation);
+          highlight.scale.setScalar(1.03);
+          return hit;
+        }
+
+        function currentAxialUnderPlayer() {
+          const ax = worldToAxial(yawObject.position.x, yawObject.position.z);
+          return ax;
+        }
+
+        // Simple HUD stats
+        let frame = 0;
+        let fps = 0;
+        let lastFpsT = performance.now();
+
+        function updateGrassAnimation(nowMs) {
+          if (!grassTopTex && !grassSideTex) return;
+          const t = nowMs * 0.001;
+          if (grassTopTex) {
+            grassTopTex.offset.x = 0.007 * Math.sin(t * 0.45);
+            grassTopTex.offset.y = 0.005 * Math.cos(t * 0.39);
+          }
+          if (grassSideTex) {
+            grassSideTex.offset.x = 0.010 * Math.sin(t * 0.65 + 0.8);
+          }
+        }
+
+        function stepGame(dt, nowMs) {
+	          if (INSPECT_MODE) {
+	            if (INSPECT_SPIN) {
+	              inspectAngle = (INSPECT_ANGLE0 + nowMs * 0.012) % 360;
+	              applyInspectCamera(inspectAngle);
+	            }
+	          } else if (!menuOpen) {
+	            const s = (fast ? 2.2 : 1.0) * speed * dt;
+	            if (keys.w) yawObject.translateZ(-s);
+	            if (keys.s) yawObject.translateZ(s);
+	            if (keys.a) yawObject.translateX(-s);
+            if (keys.d) yawObject.translateX(s);
+            if (keys.space) yawObject.position.y += s;
+            if (keys.shift) yawObject.position.y -= s;
+            yawObject.position.y = Math.max(0.5, Math.min(120, yawObject.position.y));
+          }
+
+          const hit = updateHighlight();
+
+          frame++;
+          if (nowMs - lastFpsT > 400) {
+            fps = Math.round((frame * 1000) / (nowMs - lastFpsT));
+            frame = 0;
+            lastFpsT = nowMs;
+          }
+
+	          if (INSPECT_MODE) {
+	            if (INSPECT_UI) {
+	              hud.innerHTML = `
+	                <div class="row"><span class="label">mode</span><span>inspect</span></div>
+	                <div class="row"><span class="label">type</span><span>${normalizeBlockType(INSPECT_TYPE)}</span></div>
+	                <div class="row"><span class="label">angle</span><span>${inspectAngle.toFixed(1)} deg</span></div>
+	              `;
+	            }
+	          } else if (!menuOpen) {
+	            const ax = currentAxialUnderPlayer();
+	            const sel = palette[selectedPaletteIdx];
+	            const hitStr = hit ? `hit q=${hit.object.userData.q} r=${hit.object.userData.r} y=${hit.object.userData.y}` : "hit -";
+
+	            hud.innerHTML = `
+	              <div class="row"><span class="label">fps</span><span>${fps}</span></div>
+	              <div class="row"><span class="label">pos</span><span>${yawObject.position.x.toFixed(2)}, ${yawObject.position.y.toFixed(
+	              2
+	            )}, ${yawObject.position.z.toFixed(2)}</span></div>
+	              <div class="row"><span class="label">cell</span><span>q=${ax.q} r=${ax.r}</span></div>
+	              <div class="row"><span class="label">blocks</span><span>${world.blocks.size}</span></div>
+	              <div class="row"><span class="label">tool</span><span>${sel.label} (${sel.key})</span></div>
+	              <div class="row"><span class="label">pick</span><span>${hitStr}</span></div>
+	              <div class="row"><span class="label">sound</span><span>${muted ? "<span class=\"warn\">muted</span>" : "on"} (<span class="warn">M</span>)</span></div>
+	              <div class="row"><span class="label">hint</span><span><span class="warn">LMB</span> remove, <span class="warn">RMB</span> place, <span class="warn">F</span> speed</span></div>
+	            `;
+	          }
+
+          updateGrassAnimation(nowMs);
+          renderer.render(scene, camera);
+        }
+
+        let lastT = performance.now();
+	        function animate() {
+          requestAnimationFrame(animate);
+          const now = performance.now();
+          const dt = Math.min(0.05, (now - lastT) / 1000);
+          lastT = now;
+          stepGame(dt, now);
+        }
+        animate();
+
+        function onResize() {
+          const w = window.innerWidth;
+          const h = window.innerHeight;
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+          renderer.setSize(w, h, false);
+        }
+	        window.addEventListener("resize", onResize);
+
+	        if (URL_PARAMS.get("mute") === "1") muted = true;
+
+	        if (INSPECT_MODE) {
+	          setMenu(false);
+	          // Default to clean screenshots; opt-in UI with ?ui=1
+	          if (!INSPECT_UI) {
+	            hud.style.display = "none";
+	            hotbar.style.display = "none";
+	            crosshair.style.display = "none";
+	            toast.style.display = "none";
+	          }
+	        } else {
+	          // Show a one-time hint.
+	          showToast("Click to lock mouse. LMB remove, RMB place. 1-4 selects.", 2600);
+	          setMenu(true);
+	          if (URL_PARAMS.get("autostart") === "1") startGame();
+	        }
+
+	        // Expose minimal state for automated screenshot loops.
+	        window.advanceTime = (ms) => {
+	          const dt = Math.max(1, Number(ms) || 0) / 1000;
+	          lastT += ms;
+	          stepGame(Math.min(0.05, dt), lastT);
+	        };
+	        window.render_game_to_text = () => {
+	          const payload = {
+	            mode: INSPECT_MODE ? "inspect" : menuOpen ? "menu" : "play",
+	            muted,
+	            selected: palette[selectedPaletteIdx]?.key || null,
+	            blocks: world.blocks.size,
+	          };
+	          if (INSPECT_MODE) payload.inspect = { type: normalizeBlockType(INSPECT_TYPE), angle: inspectAngle, spin: INSPECT_SPIN };
+	          return JSON.stringify(payload);
+	        };
+	        window.kelvin_set_inspect_angle = (deg) => {
+	          inspectAngle = Number(deg) || 0;
+	          applyInspectCamera(inspectAngle);
+	        };
+	      })();
+	    </script>
+	  </body>
+	</html>
