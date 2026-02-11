@@ -1,0 +1,59 @@
+Nano Banana Usage Guide (Gemini CLI)
+
+What it is:
+- Nano Banana is the Gemini CLI image extension used to generate/edit images from prompts.
+- In this project it is useful for textures, UI art, icons, and screenshot replacements.
+
+1) One-time setup
+- Check extension:
+  gemini extensions list | grep nanobanana
+- Install if missing:
+  gemini extensions install https://github.com/gemini-cli-extensions/nanobanana
+- Confirm API key (any one works):
+  echo "$NANOBANANA_GEMINI_API_KEY"
+  echo "$NANOBANANA_GOOGLE_API_KEY"
+  echo "$GEMINI_API_KEY"
+  echo "$GOOGLE_API_KEY"
+
+2) Important run mode
+- Use headless mode with -p (no fullscreen UI):
+  gemini --yolo -p '/generate "top-down lush meadow, no text"'
+
+3) Command mapping
+- Generate image:
+  gemini --yolo -p '/generate "prompt text" --count=3'
+- Edit existing image:
+  gemini --yolo -p '/edit path/to/file.png "instruction"'
+- Seamless texture/pattern:
+  gemini --yolo -p '/pattern "tileable grass texture" --size=512x512 --type=seamless --style=organic --density=dense --repeat=tile'
+- Icon generation:
+  gemini --yolo -p '/icon "minimal app icon" --sizes="64,128,256,512" --type=app-icon'
+
+4) Output location
+- Generated files are saved in:
+  ./nanobanana-output/
+
+5) Recommended prompts for HexWorld textures
+- Grass top:
+  /pattern "seamless top-down grass texture for stylized voxel game, rich green variation, no dirt, no horizon, no text" --size=512x512 --type=seamless --style=organic --density=dense --repeat=tile
+- Grass side strip:
+  /pattern "seamless horizontal grass-over-soil side texture for voxel block, grass fringe near top, soil below, no perspective, no text" --size=1024x512 --type=seamless --style=organic --density=medium --repeat=tile
+- Dirt:
+  /pattern "seamless dirt texture with pebbles and roots, stylized game art, no text" --size=512x512 --type=seamless --style=organic --density=medium --repeat=tile
+
+6) Iteration workflow
+- Generate 2-4 options.
+- Pick best tile and inspect seams at 2x2 preview.
+- If visible seams appear, re-prompt with:
+  "strictly seamless tile, no edge fade, no center vignette, uniform border continuity".
+- Re-run until seam-free in-game from multiple camera angles.
+
+7) Common issues
+- "No image data found": rerun command; try simpler prompt; try model switch.
+- Wrong options error: use options valid for that specific command.
+- Missing API key: export one supported key before running.
+
+8) Optional quality model
+- For higher quality, set:
+  export NANOBANANA_MODEL=gemini-3-pro-image-preview
+- Default model is fast and often sufficient for texture ideation.
