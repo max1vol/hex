@@ -114,6 +114,18 @@ export class HexWorldGame implements DisposeBag {
 
 	private activeQuizQuestion: QuizQuestion | null = null;
 	private activeQuizPortal: PortalInstance | null = null;
+	private readonly touchUiEnabled =
+		(window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
+		(navigator.maxTouchPoints ?? 0) > 0;
+	private joystickEl: HTMLDivElement | null = null;
+	private joystickThumbEl: HTMLDivElement | null = null;
+	private joystickPointerId: number | null = null;
+	private joystickCenterX = 0;
+	private joystickCenterY = 0;
+	private joystickRadius = 1;
+	private touchLookPointerId: number | null = null;
+	private touchLookLastX = 0;
+	private touchLookLastY = 0;
 
 	private readonly handlers: Array<() => void> = [];
 
@@ -217,7 +229,12 @@ export class HexWorldGame implements DisposeBag {
 
 		this.setMenu(false);
 		this.bootstrapDone = true;
-		this.showToast('Click to capture mouse. E near a portal to travel.', 3600);
+		this.showToast(
+			this.touchUiEnabled
+				? 'Use left joystick to move and swipe right side to look.'
+				: 'Click to capture mouse. E near a portal to travel.',
+			3600
+		);
 	}
 
 	private installGlobalHooks(): void {
@@ -241,6 +258,10 @@ export class HexWorldGame implements DisposeBag {
 					x: this.cameraCtrl.yawObject.position.x,
 					y: this.cameraCtrl.state.feetY,
 					z: this.cameraCtrl.yawObject.position.z
+				},
+				look: {
+					yaw: this.cameraCtrl.yawObject.rotation.y,
+					pitch: this.cameraCtrl.pitchObject.rotation.x
 				},
 				cell: {
 					q: ax.q,
@@ -374,8 +395,24 @@ export class HexWorldGame implements DisposeBag {
 			const pe = e as PointerEvent;
 			this.audio.unlock();
 			if (pe.pointerType === 'touch' && pe.cancelable) pe.preventDefault();
+			if (pe.pointerType === 'touch') {
+				this.handleTouchLookDown(pe);
+				return;
+			}
 			if (!this.inspect.enabled && !this.menuOpen && !this.quizOpen && !this.pointerLocked) this.lockPointer();
 		});
+		add(this.renderer.domElement, 'pointermove', (e) => {
+			const pe = e as PointerEvent;
+			if (pe.pointerType !== 'touch') return;
+			this.handleTouchLookMove(pe);
+		});
+		const onTouchLookUp = (e: Event): void => {
+			const pe = e as PointerEvent;
+			if (pe.pointerType !== 'touch') return;
+			this.handleTouchLookUp(pe);
+		};
+		add(this.renderer.domElement, 'pointerup', onTouchLookUp);
+		add(this.renderer.domElement, 'pointercancel', onTouchLookUp);
 
 		add(document, 'mousemove', (e) => {
 			if (this.menuOpen || this.quizOpen || !this.pointerLocked) return;
@@ -404,29 +441,66 @@ export class HexWorldGame implements DisposeBag {
 			opts?: AddEventListenerOptions | boolean
 		) => void
 		): void {
-		const buttons = this.el.mobileControls.querySelectorAll<HTMLButtonElement>('button[data-move]');
-		for (const btn of buttons) {
-			const moveKey = btn.dataset.move as 'forward' | 'backward' | 'left' | 'right' | 'jump' | 'descend' | undefined;
-			if (!moveKey) continue;
+		this.joystickEl = this.el.mobileControls.querySelector<HTMLDivElement>('[data-control="joystick"]');
+		this.joystickThumbEl = this.el.mobileControls.querySelector<HTMLDivElement>('[data-control="joystick-thumb"]');
+		if (this.joystickEl) {
+			this.updateJoystickBounds();
 			add(
-				btn,
+				this.joystickEl,
 				'pointerdown',
 				(e) => {
 					const pe = e as PointerEvent;
+					if (pe.pointerType !== 'touch') return;
 					this.audio.unlock();
 					if (pe.cancelable) pe.preventDefault();
-					this.input.setVirtualMovement({ [moveKey]: true });
+					this.joystickPointerId = pe.pointerId;
+					this.joystickEl?.setPointerCapture(pe.pointerId);
+					this.updateJoystickBounds();
+					this.updateJoystickByPointer(pe);
 				},
 				{ passive: false }
 			);
-			const up = (e: Event) => {
+			add(
+				this.joystickEl,
+				'pointermove',
+				(e) => {
+					const pe = e as PointerEvent;
+					if (pe.pointerId !== this.joystickPointerId) return;
+					if (pe.cancelable) pe.preventDefault();
+					this.updateJoystickByPointer(pe);
+				},
+				{ passive: false }
+			);
+			const joystickUp = (e: Event): void => {
 				const pe = e as PointerEvent;
-				if (pe.cancelable) pe.preventDefault();
-				this.input.setVirtualMovement({ [moveKey]: false });
+				if (pe.pointerId !== this.joystickPointerId) return;
+				this.joystickPointerId = null;
+				this.input.setVirtualMovement({ forward: false, backward: false, left: false, right: false });
+				this.updateJoystickThumb(0, 0);
+				this.joystickEl?.releasePointerCapture(pe.pointerId);
 			};
-			add(btn, 'pointerup', up);
-			add(btn, 'pointercancel', up);
-			add(btn, 'pointerleave', up);
+			add(this.joystickEl, 'pointerup', joystickUp);
+			add(this.joystickEl, 'pointercancel', joystickUp);
+		}
+
+		const jumpBtn = this.el.mobileControls.querySelector<HTMLButtonElement>('button[data-action="jump"]');
+		if (jumpBtn) {
+			add(
+				jumpBtn,
+				'pointerdown',
+				(e) => {
+					const pe = e as PointerEvent;
+					if (pe.pointerType !== 'touch' && pe.pointerType !== 'pen') return;
+					this.audio.unlock();
+					if (pe.cancelable) pe.preventDefault();
+					this.input.setVirtualMovement({ jump: true });
+				},
+				{ passive: false }
+			);
+			const jumpUp = (): void => this.input.setVirtualMovement({ jump: false });
+			add(jumpBtn, 'pointerup', jumpUp);
+			add(jumpBtn, 'pointercancel', jumpUp);
+			add(jumpBtn, 'pointerleave', jumpUp);
 		}
 		const interact = this.el.mobileControls.querySelector<HTMLButtonElement>('button[data-action="interact"]');
 		if (interact) {
@@ -441,6 +515,71 @@ export class HexWorldGame implements DisposeBag {
 				},
 				{ passive: false }
 			);
+		}
+	}
+
+	private updateJoystickBounds(): void {
+		if (!this.joystickEl) return;
+		const rect = this.joystickEl.getBoundingClientRect();
+		this.joystickCenterX = rect.left + rect.width / 2;
+		this.joystickCenterY = rect.top + rect.height / 2;
+		this.joystickRadius = Math.max(1, rect.width / 2);
+	}
+
+	private updateJoystickThumb(dx: number, dy: number): void {
+		if (!this.joystickThumbEl) return;
+		this.joystickThumbEl.style.transform = `translate(${dx}px, ${dy}px)`;
+	}
+
+	private updateJoystickByPointer(event: PointerEvent): void {
+		const dx = event.clientX - this.joystickCenterX;
+		const dy = event.clientY - this.joystickCenterY;
+		const distance = Math.min(Math.hypot(dx, dy), this.joystickRadius);
+		const angle = Math.atan2(dy, dx);
+		const nx = Math.cos(angle) * (distance / this.joystickRadius);
+		const ny = Math.sin(angle) * (distance / this.joystickRadius);
+		const deadzone = 0.22;
+
+		this.input.setVirtualMovement({
+			forward: ny < -deadzone,
+			backward: ny > deadzone,
+			left: nx < -deadzone,
+			right: nx > deadzone
+		});
+		this.updateJoystickThumb(nx * this.joystickRadius * 0.52, ny * this.joystickRadius * 0.52);
+	}
+
+	private handleTouchLookDown(event: PointerEvent): void {
+		if (!this.touchUiEnabled) return;
+		if (this.menuOpen || this.quizOpen || this.inspect.enabled) return;
+		if (this.touchLookPointerId !== null) return;
+		this.touchLookPointerId = event.pointerId;
+		this.touchLookLastX = event.clientX;
+		this.touchLookLastY = event.clientY;
+		try {
+			this.el.canvas.setPointerCapture(event.pointerId);
+		} catch {
+			// ignore capture failures on some browsers
+		}
+	}
+
+	private handleTouchLookMove(event: PointerEvent): void {
+		if (event.pointerId !== this.touchLookPointerId) return;
+		const dx = event.clientX - this.touchLookLastX;
+		const dy = event.clientY - this.touchLookLastY;
+		this.touchLookLastX = event.clientX;
+		this.touchLookLastY = event.clientY;
+		this.cameraCtrl.rotateByMouse(dx, dy, 0.0042);
+		if (event.cancelable) event.preventDefault();
+	}
+
+	private handleTouchLookUp(event: PointerEvent): void {
+		if (event.pointerId !== this.touchLookPointerId) return;
+		this.touchLookPointerId = null;
+		try {
+			this.el.canvas.releasePointerCapture(event.pointerId);
+		} catch {
+			// ignore release failures on some browsers
 		}
 	}
 
@@ -637,17 +776,16 @@ export class HexWorldGame implements DisposeBag {
 
 	private processOneShotActions(): void {
 		if (this.input.consumeAction('toggleMenu')) {
-			if (!this.menuOpen) {
-				this.setMenu(true);
-				if (document.pointerLockElement) void document.exitPointerLock();
-			} else {
-				this.startGame();
+			if (document.pointerLockElement) {
+				void document.exitPointerLock();
+			} else if (!this.touchUiEnabled) {
+				this.lockPointer();
 			}
 			return;
 		}
 
-		if (this.input.consumeAction('resumeGame') && this.menuOpen) {
-			this.startGame();
+		if (this.input.consumeAction('resumeGame')) {
+			if (!this.touchUiEnabled) this.lockPointer();
 			return;
 		}
 
@@ -1140,10 +1278,11 @@ export class HexWorldGame implements DisposeBag {
 		if (this.inspect.enabled) return;
 		this.audio.unlock();
 		this.setMenu(false);
-		this.lockPointer();
+		if (!this.touchUiEnabled) this.lockPointer();
 	}
 
 	private lockPointer(): void {
+		if (this.touchUiEnabled) return;
 		if (this.inspect.enabled || this.quizOpen) return;
 		if (document.pointerLockElement) return;
 		void this.renderer.domElement.requestPointerLock();
@@ -1164,7 +1303,8 @@ export class HexWorldGame implements DisposeBag {
 		this.el.hotbar.style.display = !this.menuOpen && !this.quizOpen && !this.inspect.enabled ? 'flex' : 'none';
 		this.el.crosshair.style.display = !this.menuOpen && !this.quizOpen && !this.inspect.enabled ? 'block' : 'none';
 		this.el.eraBanner.style.display = !this.menuOpen && !this.inspect.enabled ? 'block' : 'none';
-		this.el.mobileControls.style.display = !this.menuOpen && !this.quizOpen && !this.inspect.enabled ? 'grid' : 'none';
+		this.el.mobileControls.style.display =
+			this.touchUiEnabled && !this.menuOpen && !this.quizOpen && !this.inspect.enabled ? 'block' : 'none';
 		this.updateMouseCursor();
 	}
 
@@ -1202,6 +1342,7 @@ export class HexWorldGame implements DisposeBag {
 		this.camera.aspect = w / h;
 		this.camera.updateProjectionMatrix();
 		this.renderer.setSize(w, h, false);
+		this.updateJoystickBounds();
 	}
 
 	private setupInspect(): void {

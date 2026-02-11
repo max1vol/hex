@@ -51,42 +51,9 @@
 <div class="hexworld-root">
 	<canvas id="c" bind:this={canvasEl}></canvas>
 
-	<div id="overlay" bind:this={overlayEl}>
-		<div id="panel">
-			<div id="panelHeader">
-				<h1>HexWorld: Time Portals</h1>
-				<p class="sub">Explore huge biomes, answer quizzes, and rebuild landmarks</p>
-			</div>
-			<div id="panelBody">
-				<div id="kbd">
-						<div class="box">
-							<h2>Move</h2>
-							<ul>
-								<li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>Arrow</kbd> keys run</li>
-								<li><kbd>Space</kbd> jump, <kbd>Shift</kbd>/<kbd>Ctrl</kbd> descend</li>
-								<li><kbd>Mouse</kbd> look (pointer lock)</li>
-								<li><kbd>F</kbd> toggle fast movement</li>
-							</ul>
-						</div>
-					<div class="box">
-						<h2>Build & Travel</h2>
-						<ul>
-							<li><kbd>LMB</kbd> remove block, <kbd>RMB</kbd> place</li>
-							<li><kbd>1-8</kbd> select material</li>
-							<li><kbd>E</kbd> use nearby portal (quiz required)</li>
-							<li><kbd>R</kbd> regenerate current biome</li>
-						</ul>
-					</div>
-				</div>
-				<div id="ctaRow">
-					<button id="cta" bind:this={ctaEl}>Click to Play</button>
-					<div id="hint" bind:this={hintEl}>
-						Play on <code>http://localhost:5173</code>. Day/night and weather rotate automatically.
-					</div>
-				</div>
-			</div>
-		</div>
-	</div>
+	<div id="overlay" bind:this={overlayEl}></div>
+	<button id="cta" bind:this={ctaEl} class="visually-hidden" aria-hidden="true" tabindex="-1">Start</button>
+	<div id="hint" bind:this={hintEl} class="visually-hidden"></div>
 
 	<div id="eraBanner" bind:this={eraBannerEl}></div>
 	<div id="hud" bind:this={hudEl}></div>
@@ -107,19 +74,11 @@
 	</div>
 
 	<div id="mobileControls" bind:this={mobileControlsEl}>
-		<div class="pad-row">
-			<button data-move="forward">W</button>
+		<div class="touch-pad joystick" data-control="joystick">
+			<div class="thumb" data-control="joystick-thumb"></div>
 		</div>
-		<div class="pad-row">
-			<button data-move="left">A</button>
-			<button data-move="backward">S</button>
-			<button data-move="right">D</button>
-		</div>
-		<div class="pad-row right">
-			<button data-move="jump">Jump</button>
-			<button data-move="descend">Down</button>
-			<button data-action="interact">Portal</button>
-		</div>
+		<button class="touch-pad jump" data-action="jump">Jump</button>
+		<button class="touch-pad portal" data-action="interact">Portal</button>
 	</div>
 </div>
 
@@ -174,122 +133,19 @@
 	#overlay {
 		position: absolute;
 		inset: 0;
-		display: grid;
-		place-items: center;
-		padding: 24px;
+		display: none;
 		touch-action: none;
-		background: radial-gradient(800px 600px at 50% 20%, rgba(5, 8, 20, 0.72), rgba(5, 8, 20, 0.9));
-		backdrop-filter: blur(8px);
 	}
 
-	#panel {
-		width: min(860px, 96vw);
-		border-radius: 18px;
-		border: 1px solid rgba(255, 255, 255, 0.12);
-		background: linear-gradient(180deg, rgba(10, 14, 24, 0.9), rgba(10, 14, 24, 0.65));
-		box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55);
+	.visually-hidden {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
 		overflow: hidden;
-	}
-
-	#panelHeader {
-		padding: 18px 18px 14px;
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 12px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-	}
-
-	#panelHeader h1 {
-		margin: 0;
-		font-size: 18px;
-		letter-spacing: 0.2px;
-		font-weight: 700;
-	}
-
-	#panelHeader .sub {
-		margin: 0;
-		font-size: 12px;
-		color: var(--ink-dim);
-	}
-
-	#panelBody {
-		padding: 16px 18px 18px;
-		display: grid;
-		gap: 12px;
-	}
-
-	#kbd {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 10px;
-	}
-
-	.box {
-		background: rgba(255, 255, 255, 0.06);
-		border: 1px solid rgba(255, 255, 255, 0.1);
-		border-radius: 14px;
-		padding: 12px;
-	}
-
-	.box h2 {
-		margin: 0 0 8px;
-		font-size: 12px;
-		color: var(--ink-dim);
-		font-weight: 700;
-		letter-spacing: 0.3px;
-		text-transform: uppercase;
-	}
-
-	ul {
-		margin: 0;
-		padding-left: 18px;
-		font-size: 13px;
-		line-height: 1.35;
-	}
-
-	li {
-		margin: 6px 0;
-	}
-
-	kbd {
-		font:
-			12px ui-monospace,
-			SFMono-Regular,
-			Menlo,
-			Monaco,
-			Consolas,
-			'Liberation Mono',
-			'Courier New',
-			monospace;
-		background: rgba(0, 0, 0, 0.35);
-		border: 1px solid rgba(255, 255, 255, 0.18);
-		padding: 2px 6px;
-		border-radius: 6px;
-	}
-
-	#ctaRow {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		margin-top: 2px;
-	}
-
-	#cta {
-		cursor: pointer;
+		clip: rect(0, 0, 0, 0);
 		border: 0;
-		border-radius: 12px;
-		padding: 10px 14px;
-		font-weight: 800;
-		color: #0b1022;
-		background: linear-gradient(180deg, #ffe183, #ffc944);
-		box-shadow: 0 12px 30px rgba(255, 213, 74, 0.25);
-	}
-
-	#hint {
-		font-size: 12px;
-		color: var(--ink-dim);
 	}
 
 	#eraBanner {
@@ -536,48 +392,70 @@
 	}
 
 	#mobileControls {
-		position: absolute;
-		bottom: 84px;
-		left: 10px;
+		position: fixed;
+		inset: 0;
 		display: none;
-		gap: 4px;
+		pointer-events: none;
 		z-index: 7;
 		user-select: none;
 		touch-action: none;
 	}
 
-	.pad-row {
+	.touch-pad {
+		position: absolute;
+		appearance: none;
+		padding: 0;
+		pointer-events: auto;
 		display: flex;
-		gap: 4px;
-		justify-content: flex-start;
-	}
-
-	.pad-row.right {
-		justify-content: flex-end;
-	}
-
-	#mobileControls button {
-		min-width: 54px;
-		height: 44px;
-		border: 1px solid rgba(255, 255, 255, 0.22);
-		border-radius: 10px;
-		background: rgba(7, 14, 28, 0.66);
-		color: #f1f7ff;
+		align-items: center;
+		justify-content: center;
+		color: rgba(240, 246, 255, 0.92);
+		font-size: 11px;
 		font-weight: 700;
+		letter-spacing: 0.12em;
+		text-transform: uppercase;
+		background: rgba(7, 14, 28, 0.56);
+		border: 1px solid rgba(255, 255, 255, 0.22);
+		backdrop-filter: blur(6px);
 		touch-action: none;
 	}
 
-	@media (max-width: 760px) {
-		#kbd {
-			grid-template-columns: 1fr;
-		}
-		#panel {
-			width: 96vw;
-		}
-		#ctaRow {
-			flex-direction: column;
-			align-items: flex-start;
-		}
+	.touch-pad.joystick {
+		left: calc(16px + env(safe-area-inset-left));
+		bottom: calc(14px + env(safe-area-inset-bottom));
+		width: 112px;
+		height: 112px;
+		border-radius: 999px;
+	}
+
+	.touch-pad.joystick .thumb {
+		width: 62px;
+		height: 62px;
+		border-radius: 999px;
+		border: 1px solid rgba(255, 255, 255, 0.33);
+		background: rgba(143, 177, 185, 0.3);
+		transition: transform 0.05s linear;
+	}
+
+	.touch-pad.jump {
+		right: calc(18px + env(safe-area-inset-right));
+		bottom: calc(18px + env(safe-area-inset-bottom));
+		width: 86px;
+		height: 86px;
+		border-radius: 999px;
+	}
+
+	.touch-pad.portal {
+		right: calc(20px + env(safe-area-inset-right));
+		bottom: calc(112px + env(safe-area-inset-bottom));
+		width: 92px;
+		height: 54px;
+		border-radius: 16px;
+		font-size: 10px;
+		letter-spacing: 0.1em;
+	}
+
+	@media (pointer: coarse) {
 		#hud {
 			min-width: 260px;
 			max-width: 92vw;

@@ -15,7 +15,7 @@ async function readState(page: Page): Promise<RenderState> {
 
 test('scenario: movement, place/remove loop, and biome regeneration', async ({ page }) => {
 	await page.goto('/');
-	await page.click('#cta');
+	await page.locator('canvas#c').click({ position: { x: 720, y: 420 } });
 	await page.waitForFunction(() => {
 		const raw = (window as Window & { render_game_to_text?: () => string }).render_game_to_text?.() ?? '{}';
 		const state = JSON.parse(raw) as { blocks?: number; biomeId?: string };

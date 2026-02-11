@@ -85,6 +85,10 @@ export interface GameStatePayload {
 		y: number;
 		z: number;
 	};
+	look?: {
+		yaw: number;
+		pitch: number;
+	};
 	cell?: {
 		q: number;
 		r: number;

@@ -3,8 +3,7 @@ import { expect, test } from '@playwright/test';
 
 test('loads game and captures screenshots', async ({ page }, testInfo) => {
 	await page.goto('/');
-	await expect(page.locator('#cta')).toBeVisible();
-	await page.click('#cta');
+	await expect(page.locator('canvas#c')).toBeVisible();
 	await page.locator('canvas#c').click({ position: { x: 720, y: 420 } });
 
 	await page.waitForFunction(() => {
