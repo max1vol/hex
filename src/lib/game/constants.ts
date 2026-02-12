@@ -47,7 +47,7 @@ export const BLOCK_DEFINITIONS: Record<BlockType, BlockDefinition> = {
 	art: { key: 'art', label: 'Street Art', color: 0xfc5fa4, tex: '/textures/street_art.png', emissive: 0x2f1236 },
 	timber: { key: 'timber', label: 'Timber', color: 0x8a5b38, tex: '/textures/timber.png' },
 	thatch: { key: 'thatch', label: 'Thatch', color: 0xd1b27a, tex: '/textures/thatch.png' },
-	fire: { key: 'fire', label: 'Fire', color: 0xffa14c, tex: '/textures/fire.png', emissive: 0x8a3100, transparent: true, opacity: 0.88 }
+	fire: { key: 'fire', label: 'Fire', color: 0xffa14c, tex: '/textures/fire_fx.png', emissive: 0x8a3100, transparent: true, opacity: 0.88 }
 };
 
 const BUILD_KEYS: BlockType[] = [

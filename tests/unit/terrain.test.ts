@@ -56,4 +56,20 @@ describe('terrain generation', () => {
 		expect(stoneColumns.size).toBeGreaterThan(120);
 		expect(unsupportedStoneColumns).toBeLessThanOrEqual(14);
 	});
+
+	it('generates active Stonehenge settlement content (fire + huts)', () => {
+		const biome = getBiomeOrDefault('grassland-origins');
+		const data = generateBiomeTerrain(biome, 20260212);
+		let fireCount = 0;
+		let timberCount = 0;
+		let thatchCount = 0;
+		for (const type of data.baseBlocks.values()) {
+			if (type === 'fire') fireCount++;
+			if (type === 'timber') timberCount++;
+			if (type === 'thatch') thatchCount++;
+		}
+		expect(fireCount).toBeGreaterThanOrEqual(8);
+		expect(timberCount).toBeGreaterThan(120);
+		expect(thatchCount).toBeGreaterThan(110);
+	});
 });

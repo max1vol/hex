@@ -37,7 +37,7 @@ const TEXTURE_PATHS: Record<string, string> = {
 	art: '/textures/street_art.png',
 	timber: '/textures/timber.png',
 	thatch: '/textures/thatch.png',
-	fire: '/textures/fire.png'
+	fire: '/textures/fire_fx.png'
 };
 
 export interface AnimatedTextureRefs {
@@ -178,7 +178,7 @@ export function updateNatureTextureAnimation(refs: AnimatedTextureRefs, nowMs: n
 		refs.water.offset.y = 0.03 * Math.cos(t * 0.56);
 	}
 	if (refs.fire) {
-		refs.fire.offset.y = 0.11 * t;
-		refs.fire.offset.x = 0.02 * Math.sin(t * 4.2);
+		refs.fire.offset.x = 0;
+		refs.fire.offset.y = 0;
 	}
 }

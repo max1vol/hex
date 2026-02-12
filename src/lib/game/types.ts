@@ -203,10 +203,15 @@ export interface NpcInstance {
 	group: THREE.Group;
 	kind: 'villager' | 'animal';
 	species?: 'aurochs' | 'deer' | 'sheep' | 'boar';
+	activity: 'ritual' | 'hearth' | 'village' | 'grazing' | 'patrol';
 	q: number;
 	r: number;
 	homeQ: number;
 	homeR: number;
+	anchorQ: number;
+	anchorR: number;
+	groundOffset: number;
+	idleUntilMs: number;
 	speed: number;
 	phase: number;
 	targetQ: number;

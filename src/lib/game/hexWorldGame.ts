@@ -12,9 +12,11 @@ import {
 import { HexWorldAudio } from './audio';
 import { createBlockMaterials, loadBlockTextures, updateNatureTextureAnimation } from './blocks';
 import { BiomeManager } from './biomeManager';
-import { axialToWorld, hexDist, worldToAxial } from './hex';
+import { axialToWorld, hash2, hexDist, worldToAxial } from './hex';
 import { InputController } from './input';
 import { normalizeInspectBlockType, readInspectConfig, readUrlParams } from './inspect';
+import { STONEHENGE_PLAN } from './stonehengePlan.generated';
+import { loadTexture } from './texture';
 import type {
 	BlockMaterialMap,
 	BlockType,
@@ -26,7 +28,8 @@ import type {
 	PortalInstance,
 	QuizQuestion,
 	WeatherKind,
-	BiomeManifest
+	BiomeManifest,
+	AxialCoord
 } from './types';
 import { buildHotbar, setHudRows, updateHotbar } from './ui';
 import { World, type BlockMesh } from './world';
@@ -48,6 +51,20 @@ interface DisposeBag {
 	dispose(): void;
 }
 
+interface NpcAnchorPoint {
+	q: number;
+	r: number;
+}
+
+interface FireFxInstance {
+	fire: THREE.Sprite;
+	smoke: THREE.Sprite;
+	baseX: number;
+	baseY: number;
+	baseZ: number;
+	phase: number;
+}
+
 const WEATHER_LABEL: Record<WeatherKind, string> = {
 	clear: 'Clear',
 	rain: 'Rain',
@@ -56,6 +73,7 @@ const WEATHER_LABEL: Record<WeatherKind, string> = {
 };
 
 const FORBIDDEN_BREAK_BLOCKS = new Set<BlockType>(['bedrock']);
+const STONEHENGE_PLAN_SCALE = 1.35;
 
 export class HexWorldGame implements DisposeBag {
 	private readonly scene: THREE.Scene;
@@ -66,10 +84,12 @@ export class HexWorldGame implements DisposeBag {
 	private readonly blockGroup = new THREE.Group();
 	private readonly portalGroup = new THREE.Group();
 	private readonly npcGroup = new THREE.Group();
+	private readonly detailGroup = new THREE.Group();
 	private readonly raycaster = new THREE.Raycaster();
 	private readonly rayCenter = new THREE.Vector2(0, 0);
 	private readonly tmpMat3 = new THREE.Matrix3();
 	private readonly tmpVec3 = new THREE.Vector3();
+	private readonly tmpObject = new THREE.Object3D();
 
 	private readonly geoBlock: THREE.CylinderGeometry;
 	private readonly mats: BlockMaterialMap;
@@ -97,6 +117,31 @@ export class HexWorldGame implements DisposeBag {
 
 	private weatherParticles: THREE.Points<THREE.BufferGeometry, THREE.PointsMaterial> | null = null;
 	private weatherVelocity = new Float32Array(0);
+	private grassCardsA: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial> | null = null;
+	private grassCardsB: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial> | null = null;
+	private treeTrunks: THREE.InstancedMesh<THREE.CylinderGeometry, THREE.MeshLambertMaterial> | null = null;
+	private treeLeavesA: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial> | null = null;
+	private treeLeavesB: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial> | null = null;
+	private fireFx: FireFxInstance[] = [];
+	private detailTextureRefs: {
+		grassCard: THREE.Texture | null;
+		leafCard: THREE.Texture | null;
+		smoke: THREE.Texture | null;
+		fireFx: THREE.Texture | null;
+	} = {
+		grassCard: null,
+		leafCard: null,
+		smoke: null,
+		fireFx: null
+	};
+	private grassCardMaterial: THREE.MeshLambertMaterial | null = null;
+	private leafCardMaterial: THREE.MeshLambertMaterial | null = null;
+	private smokeSpriteMaterial: THREE.SpriteMaterial | null = null;
+	private fireSpriteMaterial: THREE.SpriteMaterial | null = null;
+	private detailDirty = true;
+	private detailCenterQ = Number.NaN;
+	private detailCenterR = Number.NaN;
+	private lastDetailRebuildAt = -Infinity;
 
 	private portals: PortalInstance[] = [];
 	private npcs: NpcInstance[] = [];
@@ -188,7 +233,7 @@ export class HexWorldGame implements DisposeBag {
 		this.fillLight.position.set(-16, 18, -20);
 		this.scene.add(this.fillLight);
 
-		this.scene.add(this.blockGroup, this.portalGroup, this.npcGroup);
+		this.scene.add(this.blockGroup, this.portalGroup, this.npcGroup, this.detailGroup);
 
 		this.geoBlock = new THREE.CylinderGeometry(HEX_RADIUS, HEX_RADIUS, BLOCK_H, 6, 1, false);
 		this.geoBlock.rotateY(Math.PI / 6);
@@ -230,6 +275,8 @@ export class HexWorldGame implements DisposeBag {
 		delete window.hexworld_debug_action;
 
 		this.world.clear();
+		this.clearDetailDecor();
+		this.disposeDetailAssets();
 		this.audio.dispose();
 		this.renderer.dispose();
 		this.geoBlock.dispose();
@@ -241,6 +288,11 @@ export class HexWorldGame implements DisposeBag {
 		} catch (err) {
 			console.warn('Texture load failed:', err);
 			this.showToast('Some textures failed to load.', 2800);
+		}
+		try {
+			await this.loadDetailTextures();
+		} catch (err) {
+			console.warn('Detail texture load failed:', err);
 		}
 
 		if (this.inspect.enabled) {
@@ -256,6 +308,74 @@ export class HexWorldGame implements DisposeBag {
 
 		this.setMenu(false);
 		this.bootstrapDone = true;
+	}
+
+	private async loadDetailTextures(): Promise<void> {
+		const loader = new THREE.TextureLoader();
+		const load = async (url: string): Promise<THREE.Texture | null> => {
+			try {
+				return await loadTexture(this.renderer, loader, url, {
+					wrapS: THREE.ClampToEdgeWrapping,
+					wrapT: THREE.ClampToEdgeWrapping,
+					minFilter: THREE.LinearMipmapLinearFilter,
+					magFilter: THREE.LinearFilter
+				});
+			} catch {
+				return null;
+			}
+		};
+
+		const [grassCard, leafCard, smoke, fireFx] = await Promise.all([
+			load('/textures/grass_card.png'),
+			load('/textures/leaf_card.png'),
+			load('/textures/smoke.png'),
+			load('/textures/fire_fx.png')
+		]);
+		this.detailTextureRefs = { grassCard, leafCard, smoke, fireFx };
+
+		this.grassCardMaterial = new THREE.MeshLambertMaterial({
+			map: grassCard ?? undefined,
+			color: grassCard ? 0xffffff : 0x6e9f41,
+			transparent: true,
+			alphaTest: 0.43,
+			side: THREE.DoubleSide
+		});
+		this.leafCardMaterial = new THREE.MeshLambertMaterial({
+			map: leafCard ?? undefined,
+			color: leafCard ? 0xffffff : 0x5f8b43,
+			transparent: true,
+			alphaTest: 0.48,
+			side: THREE.DoubleSide
+		});
+		this.smokeSpriteMaterial = new THREE.SpriteMaterial({
+			map: smoke ?? undefined,
+			color: 0xe5e5e5,
+			transparent: true,
+			opacity: 0.54,
+			depthWrite: false,
+			depthTest: true
+		});
+		this.fireSpriteMaterial = new THREE.SpriteMaterial({
+			map: fireFx ?? undefined,
+			color: 0xffffff,
+			transparent: true,
+			opacity: 0.95,
+			blending: THREE.AdditiveBlending,
+			depthWrite: false
+		});
+	}
+
+	private disposeDetailAssets(): void {
+		this.grassCardMaterial?.dispose();
+		this.grassCardMaterial = null;
+		this.leafCardMaterial?.dispose();
+		this.leafCardMaterial = null;
+		this.smokeSpriteMaterial?.dispose();
+		this.smokeSpriteMaterial = null;
+		this.fireSpriteMaterial?.dispose();
+		this.fireSpriteMaterial = null;
+		for (const tex of Object.values(this.detailTextureRefs)) tex?.dispose();
+		this.detailTextureRefs = { grassCard: null, leafCard: null, smoke: null, fireFx: null };
 	}
 
 	private installGlobalHooks(): void {
@@ -331,6 +451,7 @@ export class HexWorldGame implements DisposeBag {
 				if (!this.world.has(ax.q, ax.r, y) && this.world.add(ax.q, ax.r, y, typeKey)) {
 					this.biomeManager.recordEdit(ax.q, ax.r, y, typeKey);
 					if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
+					this.detailDirty = true;
 					return true;
 				}
 				return false;
@@ -351,6 +472,7 @@ export class HexWorldGame implements DisposeBag {
 				if (this.world.remove(ax.q, ax.r, y)) {
 					this.biomeManager.recordEdit(ax.q, ax.r, y, null);
 					if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
+					this.detailDirty = true;
 					return true;
 				}
 				return false;
@@ -749,6 +871,7 @@ export class HexWorldGame implements DisposeBag {
 
 		this.clearPortals();
 		this.clearNpcs();
+		this.clearDetailDecor();
 		this.createPortals(data.portalAnchors);
 		this.createNpcs(data.npcSpawns);
 
@@ -764,6 +887,8 @@ export class HexWorldGame implements DisposeBag {
 			this.cameraCtrl.lookAt(new THREE.Vector3(0, this.world.getGroundY(0, 0) + 3, 0));
 		}
 		this.updateRenderWindow(true);
+		this.detailDirty = true;
+		this.rebuildDetailDecor(true, performance.now());
 		this.biomeManager.saveCurrentState(manifest.id);
 		if (fromPortal) this.audio.playPortal();
 		if (fromPortal) this.showToast(`Arrived in ${manifest.place}`, 2200);
@@ -784,6 +909,264 @@ export class HexWorldGame implements DisposeBag {
 	private clearNpcs(): void {
 		for (const npc of this.npcs) this.npcGroup.remove(npc.group);
 		this.npcs = [];
+	}
+
+	private clearDetailDecor(): void {
+		for (const fx of this.fireFx) {
+			this.detailGroup.remove(fx.fire, fx.smoke);
+			(fx.fire.material as THREE.SpriteMaterial).dispose();
+			(fx.smoke.material as THREE.SpriteMaterial).dispose();
+		}
+		this.fireFx = [];
+
+		const instanced = [this.grassCardsA, this.grassCardsB, this.treeTrunks, this.treeLeavesA, this.treeLeavesB];
+		for (const mesh of instanced) {
+			if (!mesh) continue;
+			this.detailGroup.remove(mesh);
+			mesh.geometry.dispose();
+		}
+		this.grassCardsA = null;
+		this.grassCardsB = null;
+		this.treeTrunks = null;
+		this.treeLeavesA = null;
+		this.treeLeavesB = null;
+		this.detailDirty = true;
+		this.detailCenterQ = Number.NaN;
+		this.detailCenterR = Number.NaN;
+		this.lastDetailRebuildAt = -Infinity;
+	}
+
+	private scalePlanCells(cells: ReadonlyArray<{ q: number; r: number }>, scale: number): AxialCoord[] {
+		const out: AxialCoord[] = [];
+		const seen = new Set<string>();
+		for (const c of cells) {
+			const w = axialToWorld(c.q, c.r);
+			const a = worldToAxial(w.x * scale, w.z * scale);
+			const k = `${a.q},${a.r}`;
+			if (seen.has(k)) continue;
+			seen.add(k);
+			out.push(a);
+		}
+		return out;
+	}
+
+	private rebuildDetailDecor(force: boolean, nowMs: number): void {
+		if (!this.currentBiome || this.inspect.enabled) return;
+		const ax = this.currentAxialUnderPlayer();
+		const moved =
+			!Number.isFinite(this.detailCenterQ) ||
+			!Number.isFinite(this.detailCenterR) ||
+			hexDist(this.detailCenterQ, this.detailCenterR, ax.q, ax.r) >= 4;
+		if (!force && !this.detailDirty && !moved) return;
+		this.lastDetailRebuildAt = nowMs;
+		this.detailCenterQ = ax.q;
+		this.detailCenterR = ax.r;
+
+		this.rebuildGrassCards(ax.q, ax.r);
+		if (this.currentBiome.id === 'grassland-origins' && !this.treeTrunks) this.buildStonehengeTrees();
+		this.rebuildFireFx();
+		this.detailDirty = false;
+	}
+
+	private rebuildGrassCards(centerQ: number, centerR: number): void {
+		if (!this.grassCardMaterial) return;
+		if (this.grassCardsA) {
+			this.detailGroup.remove(this.grassCardsA);
+			this.grassCardsA.geometry.dispose();
+			this.grassCardsA = null;
+		}
+		if (this.grassCardsB) {
+			this.detailGroup.remove(this.grassCardsB);
+			this.grassCardsB.geometry.dispose();
+			this.grassCardsB = null;
+		}
+
+		const radius = Math.max(10, Math.min(this.renderRadius - 2, 15));
+		const cells: Array<{ q: number; r: number; phase: number }> = [];
+		const maxCards = this.touchUiEnabled ? 520 : 780;
+
+		for (let dq = -radius; dq <= radius; dq++) {
+			const drMin = Math.max(-radius, -dq - radius);
+			const drMax = Math.min(radius, -dq + radius);
+			for (let dr = drMin; dr <= drMax; dr++) {
+				const q = centerQ + dq;
+				const r = centerR + dr;
+				const topY = this.world.getTopSolidY(q, r);
+				if (topY < 1) continue;
+				if (this.world.getType(q, r, topY) !== 'grass') continue;
+				if (this.world.getType(q, r, topY + 1)) continue;
+				const p = hash2(q * 1.17, r * 1.31);
+				if (p < 0.52) continue;
+				cells.push({ q, r, phase: p * Math.PI * 2 });
+				if (cells.length >= maxCards) break;
+			}
+			if (cells.length >= maxCards) break;
+		}
+
+		if (!cells.length) return;
+		const geo = new THREE.PlaneGeometry(0.92, 1.22, 1, 1);
+		const a = new THREE.InstancedMesh(geo, this.grassCardMaterial, cells.length);
+		const b = new THREE.InstancedMesh(geo.clone(), this.grassCardMaterial, cells.length);
+		a.frustumCulled = true;
+		b.frustumCulled = true;
+
+		for (let i = 0; i < cells.length; i++) {
+			const c = cells[i];
+			const w = axialToWorld(c.q, c.r);
+			const ground = this.world.getGroundY(c.q, c.r);
+			const jitterA = (hash2(c.q * 2.7, c.r * 2.3) - 0.5) * 0.24;
+			const jitterB = (hash2(c.q * 3.3, c.r * 2.9) - 0.5) * 0.24;
+			const scale = 0.7 + hash2(c.q * 3.7, c.r * 1.9) * 0.55;
+			const yaw = c.phase;
+			const y = ground + 0.44 * scale;
+
+			this.tmpObject.position.set(w.x + jitterA, y, w.z + jitterB);
+			this.tmpObject.rotation.set(0, yaw, 0);
+			this.tmpObject.scale.set(scale, scale, scale);
+			this.tmpObject.updateMatrix();
+			a.setMatrixAt(i, this.tmpObject.matrix);
+
+			this.tmpObject.rotation.set(0, yaw + Math.PI * 0.5, 0);
+			this.tmpObject.updateMatrix();
+			b.setMatrixAt(i, this.tmpObject.matrix);
+		}
+		a.instanceMatrix.needsUpdate = true;
+		b.instanceMatrix.needsUpdate = true;
+
+		this.grassCardsA = a;
+		this.grassCardsB = b;
+		this.detailGroup.add(a, b);
+	}
+
+	private buildStonehengeTrees(): void {
+		if (!this.leafCardMaterial) return;
+		const manifest = this.currentBiome;
+		if (!manifest || manifest.id !== 'grassland-origins') return;
+		const scale = STONEHENGE_PLAN_SCALE;
+		const pathSet = new Set(this.scalePlanCells(STONEHENGE_PLAN.pathCells, scale).map((c) => `${c.q},${c.r}`));
+		const waterSet = new Set(this.scalePlanCells(STONEHENGE_PLAN.waterCells, scale).map((c) => `${c.q},${c.r}`));
+		const hutSet = new Set(this.scalePlanCells(STONEHENGE_PLAN.hutCenters, scale).map((c) => `${c.q},${c.r}`));
+
+		const anchors: Array<{ q: number; r: number; trunkH: number; phase: number }> = [];
+		const blocked = new Set<string>();
+		const radius = manifest.radius - 2;
+		for (let q = -radius; q <= radius; q++) {
+			for (let r = -radius; r <= radius; r++) {
+				const d = hexDist(0, 0, q, r);
+				if (d > radius || d < 23) continue;
+				const ck = `${q},${r}`;
+				if (blocked.has(ck)) continue;
+				if (pathSet.has(ck) || waterSet.has(ck) || hutSet.has(ck)) continue;
+				if (hash2(q * 0.57, r * 0.73) < 0.992) continue;
+				const topY = this.world.getTopSolidY(q, r);
+				if (topY < 2) continue;
+				if (this.world.getType(q, r, topY) !== 'grass') continue;
+				const trunkH = 2.8 + hash2(q * 1.9, r * 2.1) * 1.9;
+				anchors.push({ q, r, trunkH, phase: hash2(q * 2.33, r * 1.41) * Math.PI * 2 });
+				for (const dq of [-2, -1, 0, 1, 2]) {
+					for (const dr of [-2, -1, 0, 1, 2]) {
+						if (hexDist(0, 0, dq, dr) > 2) continue;
+						blocked.add(`${q + dq},${r + dr}`);
+					}
+				}
+			}
+		}
+		if (!anchors.length) return;
+
+		const trunkGeo = new THREE.CylinderGeometry(0.18, 0.26, 1, 6, 1, false);
+		trunkGeo.rotateY(Math.PI / 6);
+		const leafGeo = new THREE.PlaneGeometry(3.2, 3.0, 1, 1);
+		const trunkMat = this.mats.timber[0] as THREE.MeshLambertMaterial;
+		const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, anchors.length);
+		const leavesA = new THREE.InstancedMesh(leafGeo, this.leafCardMaterial, anchors.length);
+		const leavesB = new THREE.InstancedMesh(leafGeo.clone(), this.leafCardMaterial, anchors.length);
+
+		for (let i = 0; i < anchors.length; i++) {
+			const a = anchors[i];
+			const w = axialToWorld(a.q, a.r);
+			const ground = this.world.getGroundY(a.q, a.r);
+			const width = 0.78 + hash2(a.q * 0.91, a.r * 1.07) * 0.36;
+			const crown = 0.95 + hash2(a.q * 1.41, a.r * 1.69) * 0.62;
+
+			this.tmpObject.position.set(w.x, ground + a.trunkH * 0.5, w.z);
+			this.tmpObject.rotation.set(0, a.phase, 0);
+			this.tmpObject.scale.set(width, a.trunkH, width);
+			this.tmpObject.updateMatrix();
+			trunks.setMatrixAt(i, this.tmpObject.matrix);
+
+			this.tmpObject.position.set(w.x, ground + a.trunkH + 0.95, w.z);
+			this.tmpObject.rotation.set(0, a.phase, 0);
+			this.tmpObject.scale.set(crown, crown, crown);
+			this.tmpObject.updateMatrix();
+			leavesA.setMatrixAt(i, this.tmpObject.matrix);
+
+			this.tmpObject.rotation.set(0, a.phase + Math.PI * 0.5, 0);
+			this.tmpObject.updateMatrix();
+			leavesB.setMatrixAt(i, this.tmpObject.matrix);
+		}
+
+		trunks.instanceMatrix.needsUpdate = true;
+		leavesA.instanceMatrix.needsUpdate = true;
+		leavesB.instanceMatrix.needsUpdate = true;
+		this.treeTrunks = trunks;
+		this.treeLeavesA = leavesA;
+		this.treeLeavesB = leavesB;
+		this.detailGroup.add(trunks, leavesA, leavesB);
+	}
+
+	private rebuildFireFx(): void {
+		for (const fx of this.fireFx) {
+			this.detailGroup.remove(fx.fire, fx.smoke);
+			(fx.fire.material as THREE.SpriteMaterial).dispose();
+			(fx.smoke.material as THREE.SpriteMaterial).dispose();
+		}
+		this.fireFx = [];
+		if (!this.fireSpriteMaterial || !this.smokeSpriteMaterial) return;
+
+		let count = 0;
+		for (const mesh of this.world.blocks.values()) {
+			const ud = mesh.userData as BlockUserData;
+			if (ud.typeKey !== 'fire') continue;
+			const fire = new THREE.Sprite(this.fireSpriteMaterial.clone());
+			const smoke = new THREE.Sprite(this.smokeSpriteMaterial.clone());
+			fire.position.set(mesh.position.x, mesh.position.y + 0.62, mesh.position.z);
+			fire.scale.set(0.95, 1.4, 1);
+			smoke.position.set(mesh.position.x, mesh.position.y + 1.1, mesh.position.z);
+			smoke.scale.set(0.7, 0.7, 1);
+			this.detailGroup.add(fire, smoke);
+			this.fireFx.push({
+				fire,
+				smoke,
+				baseX: mesh.position.x,
+				baseY: mesh.position.y,
+				baseZ: mesh.position.z,
+				phase: hash2(ud.q * 1.37, ud.r * 1.91) * Math.PI * 2
+			});
+			count++;
+			if (count >= 48) break;
+		}
+	}
+
+	private updateFireFx(nowMs: number): void {
+		for (const fx of this.fireFx) {
+			const t = nowMs * 0.001 + fx.phase;
+			const pulse = 0.85 + Math.sin(t * 6.2) * 0.16;
+			const fireMat = fx.fire.material as THREE.SpriteMaterial;
+			fireMat.opacity = 0.78 + Math.sin(t * 8.1) * 0.15;
+			fx.fire.position.set(fx.baseX, fx.baseY + 0.62 + Math.sin(t * 5.4) * 0.05, fx.baseZ);
+			fx.fire.scale.set(0.92 * pulse, 1.34 * pulse, 1);
+
+			const smokeMat = fx.smoke.material as THREE.SpriteMaterial;
+			const cycle = (t * 0.22) % 1;
+			smokeMat.opacity = Math.max(0, 0.42 * (1 - cycle));
+			fx.smoke.position.set(
+				fx.baseX + Math.sin(t * 1.7) * 0.15 * cycle,
+				fx.baseY + 0.9 + cycle * 1.65,
+				fx.baseZ + Math.cos(t * 1.4) * 0.12 * cycle
+			);
+			const s = 0.58 + cycle * 1.34;
+			fx.smoke.scale.set(s, s, 1);
+		}
 	}
 
 	private createPortals(anchors: Array<{ q: number; r: number; link: { toBiome: string; label: string } }>): void {
@@ -839,17 +1222,17 @@ export class HexWorldGame implements DisposeBag {
 		const pants = new THREE.MeshStandardMaterial({ color: 0x514236, roughness: 0.92 });
 
 		const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skin);
-		head.position.set(0, 1.38, 0);
-		const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.32), shirt);
-		body.position.set(0, 0.95, 0);
-		const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.48, 0.18), pants);
-		legL.position.set(-0.11, 0.5, 0);
+		head.position.set(0, 1.34, 0);
+		const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.34), shirt);
+		body.position.set(0, 0.88, 0);
+		const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.52, 0.18), pants);
+		legL.position.set(-0.11, 0.26, 0);
 		const legR = legL.clone();
-		legR.position.set(0.11, 0.5, 0);
+		legR.position.set(0.11, 0.26, 0);
 		const armL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.14), skin);
-		armL.position.set(-0.34, 0.96, 0);
+		armL.position.set(-0.34, 0.88, 0);
 		const armR = armL.clone();
-		armR.position.set(0.34, 0.96, 0);
+		armR.position.set(0.34, 0.88, 0);
 		g.add(head, body, legL, legR, armL, armR);
 		return g;
 	}
@@ -866,11 +1249,11 @@ export class HexWorldGame implements DisposeBag {
 		const dark = new THREE.MeshStandardMaterial({ color: 0x2e2520, roughness: 0.96 });
 
 		const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.42, 0.36), fur);
-		body.position.set(0, 0.62, 0);
+		body.position.set(0, 0.53, 0);
 		const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.24), fur);
-		head.position.set(0.42, 0.67, 0);
+		head.position.set(0.42, 0.56, 0);
 		const snout = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.1), dark);
-		snout.position.set(0.58, 0.63, 0);
+		snout.position.set(0.58, 0.52, 0);
 		const legGeo = new THREE.BoxGeometry(0.12, 0.34, 0.12);
 		const legOffsets: Array<[number, number]> = [
 			[-0.22, -0.12],
@@ -880,14 +1263,14 @@ export class HexWorldGame implements DisposeBag {
 		];
 		for (const [x, z] of legOffsets) {
 			const leg = new THREE.Mesh(legGeo, dark);
-			leg.position.set(x, 0.3, z);
+			leg.position.set(x, 0.17, z);
 			g.add(leg);
 		}
 		if (species === 'aurochs' || species === 'boar') {
 			const horn = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), dark);
 			const horn2 = horn.clone();
-			horn.position.set(0.34, 0.82, -0.1);
-			horn2.position.set(0.34, 0.82, 0.1);
+			horn.position.set(0.34, 0.71, -0.1);
+			horn2.position.set(0.34, 0.71, 0.1);
 			g.add(horn, horn2);
 		}
 		g.add(body, head, snout);
@@ -898,24 +1281,53 @@ export class HexWorldGame implements DisposeBag {
 		const inStonehenge = this.currentBiome?.id === 'grassland-origins';
 		const maxNpcs = inStonehenge ? 28 : 16;
 		const animalKinds: Array<'aurochs' | 'deer' | 'sheep' | 'boar'> = ['aurochs', 'deer', 'sheep', 'boar'];
+		const ritualAnchors = inStonehenge ? this.scalePlanCells(STONEHENGE_PLAN.standingStoneSeeds, STONEHENGE_PLAN_SCALE) : [];
+		const hearthAnchors = inStonehenge ? this.scalePlanCells(STONEHENGE_PLAN.hearthCenters, STONEHENGE_PLAN_SCALE) : [];
+		const villageAnchors = inStonehenge ? this.scalePlanCells(STONEHENGE_PLAN.hutCenters, STONEHENGE_PLAN_SCALE) : [];
+		const pickAnchor = (arr: NpcAnchorPoint[], idx: number, fallback: { q: number; r: number }): { q: number; r: number } =>
+			arr.length ? arr[idx % arr.length] : fallback;
+
 		for (let i = 0; i < Math.min(maxNpcs, spawns.length); i++) {
 			const s = spawns[i];
 			const worldPos = axialToWorld(s.q, s.r);
 			const ground = this.world.getGroundY(s.q, s.r);
-			const kind: 'villager' | 'animal' = inStonehenge && i % 3 !== 0 ? 'animal' : 'villager';
+			const kind: 'villager' | 'animal' = inStonehenge ? (i % 4 === 0 ? 'animal' : 'villager') : i % 5 === 0 ? 'animal' : 'villager';
 			const species = kind === 'animal' ? animalKinds[i % animalKinds.length] : undefined;
+			let activity: NpcInstance['activity'] = 'patrol';
+			let anchor = { q: s.q, r: s.r };
+			if (inStonehenge) {
+				if (kind === 'animal') {
+					activity = 'grazing';
+					anchor = pickAnchor(villageAnchors, i, s);
+				} else if (i % 3 === 0) {
+					activity = 'ritual';
+					anchor = pickAnchor(ritualAnchors, i, s);
+				} else if (i % 3 === 1) {
+					activity = 'hearth';
+					anchor = pickAnchor(hearthAnchors, i, s);
+				} else {
+					activity = 'village';
+					anchor = pickAnchor(villageAnchors, i, s);
+				}
+			}
 			const group = kind === 'animal' ? this.createAnimalMesh(species ?? 'deer') : this.createVillagerMesh();
-			group.position.set(worldPos.x, ground + 0.04, worldPos.z);
+			const groundOffset = kind === 'animal' ? 0.015 : 0.02;
+			group.position.set(worldPos.x, ground + groundOffset, worldPos.z);
 			this.npcGroup.add(group);
 			this.npcs.push({
 				id: `npc-${i}`,
 				group,
 				kind,
 				species,
+				activity,
 				q: s.q,
 				r: s.r,
 				homeQ: s.q,
 				homeR: s.r,
+				anchorQ: anchor.q,
+				anchorR: anchor.r,
+				groundOffset,
+				idleUntilMs: 0,
 				speed: kind === 'animal' ? 1.05 + Math.random() * 0.85 : 0.78 + Math.random() * 0.72,
 				phase: Math.random() * Math.PI * 2,
 				targetQ: s.q,
@@ -926,27 +1338,77 @@ export class HexWorldGame implements DisposeBag {
 	}
 
 	private assignNpcTarget(npc: NpcInstance): void {
-		for (let i = 0; i < 12; i++) {
-			const q = npc.homeQ + Math.floor(Math.random() * 11) - 5;
-			const r = npc.homeR + Math.floor(Math.random() * 11) - 5;
-			if (Math.abs(q) + Math.abs(r) > (this.currentBiome?.radius ?? WORLD_MIN_RADIUS) + 4) continue;
-			if (this.world.getTopSolidY(q, r) < 1) continue;
-			npc.targetQ = q;
-			npc.targetR = r;
+		const biomeRadius = this.currentBiome?.radius ?? WORLD_MIN_RADIUS;
+		const pickAround = (q0: number, r0: number, rad: number): { q: number; r: number } => ({
+			q: q0 + Math.floor(Math.random() * (rad * 2 + 1)) - rad,
+			r: r0 + Math.floor(Math.random() * (rad * 2 + 1)) - rad
+		});
+		const isWalkable = (q: number, r: number): boolean => {
+			if (hexDist(0, 0, q, r) > biomeRadius + 2) return false;
+			const top = this.world.getTopSolidY(q, r);
+			if (top < 1) return false;
+			const topType = this.world.getType(q, r, top);
+			return topType !== 'water' && topType !== 'fire';
+		};
+
+		for (let i = 0; i < 20; i++) {
+			let cand: { q: number; r: number };
+			switch (npc.activity) {
+				case 'ritual': {
+					const angle = npc.phase + Math.random() * Math.PI * 2;
+					const rad = 6 + Math.floor(Math.random() * 6);
+					cand = {
+						q: npc.anchorQ + Math.round(Math.cos(angle) * rad),
+						r: npc.anchorR + Math.round(Math.sin(angle) * rad)
+					};
+					break;
+				}
+				case 'hearth':
+					cand = pickAround(npc.anchorQ, npc.anchorR, 3);
+					break;
+				case 'village':
+					cand = pickAround(npc.anchorQ, npc.anchorR, 5);
+					break;
+				case 'grazing':
+					cand = pickAround(npc.anchorQ, npc.anchorR, 7);
+					if (hexDist(0, 0, cand.q, cand.r) < 18) continue;
+					break;
+				default:
+					cand = pickAround(npc.homeQ, npc.homeR, 5);
+					break;
+			}
+			if (!isWalkable(cand.q, cand.r)) continue;
+			npc.targetQ = cand.q;
+			npc.targetR = cand.r;
 			return;
 		}
-		npc.targetQ = npc.homeQ;
-		npc.targetR = npc.homeR;
+		npc.targetQ = npc.anchorQ;
+		npc.targetR = npc.anchorR;
 	}
 
 	private updateNpcs(dt: number, nowMs: number): void {
 		for (const npc of this.npcs) {
+			if (npc.idleUntilMs > nowMs) {
+				const ax = worldToAxial(npc.group.position.x, npc.group.position.z);
+				const ground = this.world.getGroundY(ax.q, ax.r);
+				const bob = npc.kind === 'animal' ? 0.01 : 0.015;
+				npc.group.position.y = ground + npc.groundOffset + Math.sin(nowMs * 0.005 + npc.phase) * bob;
+				continue;
+			}
+
 			const target = axialToWorld(npc.targetQ, npc.targetR);
 			const dx = target.x - npc.group.position.x;
 			const dz = target.z - npc.group.position.z;
 			const dist = Math.hypot(dx, dz);
 
 			if (dist < 0.25) {
+				const pause =
+					npc.activity === 'ritual'
+						? 240 + Math.random() * 680
+						: npc.activity === 'hearth'
+							? 350 + Math.random() * 900
+							: 220 + Math.random() * 620;
+				npc.idleUntilMs = nowMs + pause;
 				this.assignNpcTarget(npc);
 				continue;
 			}
@@ -960,8 +1422,8 @@ export class HexWorldGame implements DisposeBag {
 			npc.q = ax.q;
 			npc.r = ax.r;
 			const ground = this.world.getGroundY(ax.q, ax.r);
-			const bobAmp = npc.kind === 'animal' ? 0.022 : 0.04;
-			npc.group.position.y = ground + 0.04 + Math.sin(nowMs * 0.006 + npc.phase) * bobAmp;
+			const bobAmp = npc.kind === 'animal' ? 0.014 : 0.019;
+			npc.group.position.y = ground + npc.groundOffset + Math.sin(nowMs * 0.006 + npc.phase) * bobAmp;
 		}
 	}
 
@@ -1123,6 +1585,7 @@ export class HexWorldGame implements DisposeBag {
 			this.audio.playBreak(ud.typeKey ?? 'dirt');
 			if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
 			this.invalidateHighlightCache();
+			this.detailDirty = true;
 		}
 	}
 
@@ -1142,6 +1605,7 @@ export class HexWorldGame implements DisposeBag {
 			this.audio.playPlace(typeKey);
 			if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
 			this.invalidateHighlightCache();
+			this.detailDirty = true;
 		}
 	}
 
@@ -1258,6 +1722,7 @@ export class HexWorldGame implements DisposeBag {
 				this.updateNpcs(dt, nowMs);
 				this.updatePortalAnimations(nowMs);
 				this.updateRenderWindow();
+				this.rebuildDetailDecor(false, nowMs);
 			}
 		}
 
@@ -1279,6 +1744,7 @@ export class HexWorldGame implements DisposeBag {
 			water: (this.mats.water[0] as THREE.MeshLambertMaterial).map as THREE.Texture | null,
 			fire: (this.mats.fire[0] as THREE.MeshLambertMaterial).map as THREE.Texture | null
 		}, nowMs);
+		this.updateFireFx(nowMs);
 		this.audio.step(nowMs, this.daylightFactor());
 		this.renderer.render(this.scene, this.camera);
 	}

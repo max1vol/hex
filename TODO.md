@@ -30,6 +30,19 @@ All previously listed near-term engineering and design tasks are implemented in 
 - [x] Removed startup controls toast/dialog noise from default gameplay flow.
 - [x] Added unit coverage for render-window behavior and stabilized Playwright startup timeout handling.
 
+## Latest update (2026-02-12, realistic texture + foliage FX pass)
+
+- [x] Replaced Stonehenge core terrain textures with high-resolution realistic Nano Banana outputs (`grass`, `dirt`, `stone`, `sand`, `water`, `timber`, `thatch`), plus generated side blend for `grass_side`.
+- [x] Added texture preparation pipeline script (`scripts/textures/prepare-realistic-textures.ts`) to derive usable runtime assets (alpha-cut foliage cards, smoke sprite, fire FX frame).
+- [x] Switched fire block rendering to realistic fire texture (`fire_fx.png`) and removed old UV-scroll artifacting for fire.
+- [x] Added plane/sprite-based environmental FX layer in-game:
+  - grass tuft overlay cards on exposed grass tops (auto-removed when covered),
+  - tree leaf cards + trunk instancing for Stonehenge outskirts,
+  - animated fire + smoke sprites anchored to hearth/fire blocks.
+- [x] Fixed floating NPCs by grounding mesh origins and adding per-species ground offsets.
+- [x] Improved Stonehenge NPC behavior with role-based activity anchors (`ritual`, `hearth`, `village`, `grazing`) so movement is tied to visible landmarks instead of random roaming.
+- [x] Re-ran validation (`npm run test:unit`, `npm run check`, Playwright touch + gameplay/debug coverage).
+
 ## Current state
 
 - [x] Core sandbox rebuilt into a modular multi-biome game loop.
