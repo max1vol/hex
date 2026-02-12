@@ -212,6 +212,8 @@ export interface NpcInstance {
 	anchorR: number;
 	groundOffset: number;
 	idleUntilMs: number;
+	yawOffset: number;
+	walkCycle: number;
 	speed: number;
 	phase: number;
 	targetQ: number;

@@ -43,6 +43,15 @@ All previously listed near-term engineering and design tasks are implemented in 
 - [x] Improved Stonehenge NPC behavior with role-based activity anchors (`ritual`, `hearth`, `village`, `grazing`) so movement is tied to visible landmarks instead of random roaming.
 - [x] Re-ran validation (`npm run test:unit`, `npm run check`, Playwright touch + gameplay/debug coverage).
 
+## Latest update (2026-02-12, fire/render-distance/NPC animation correction pass)
+
+- [x] Fixed fire block texture presentation: fire now uses side-only textured faces with transparent caps to avoid distorted top-face artifacts.
+- [x] Added repeatable block-angle rendering workflow with Playwright inspect captures (`tests/e2e/block-inspect.spec.ts`) and npm script `render:block-angles` for side/top/natural screenshots.
+- [x] Increased default block render distance by roughly 4x and extended camera far plane so distant terrain persists correctly.
+- [x] Aligned visibility distances across blocks, decorative props, and NPCs to avoid mismatched far-distance rendering.
+- [x] Switched Stonehenge trees to block-based generation (trunk + leaf block clusters) instead of billboard leaf planes.
+- [x] Added articulated procedural walking animation for villagers and animals (limb swing), plus heading-first movement to avoid side-sliding.
+
 ## Current state
 
 - [x] Core sandbox rebuilt into a modular multi-biome game loop.

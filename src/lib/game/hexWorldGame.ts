@@ -119,9 +119,8 @@ export class HexWorldGame implements DisposeBag {
 	private weatherVelocity = new Float32Array(0);
 	private grassCardsA: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial> | null = null;
 	private grassCardsB: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial> | null = null;
-	private treeTrunks: THREE.InstancedMesh<THREE.CylinderGeometry, THREE.MeshLambertMaterial> | null = null;
-	private treeLeavesA: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial> | null = null;
-	private treeLeavesB: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshLambertMaterial> | null = null;
+	private treeTrunkBlocks: THREE.InstancedMesh<THREE.CylinderGeometry, THREE.MeshLambertMaterial> | null = null;
+	private treeLeafBlocks: THREE.InstancedMesh<THREE.CylinderGeometry, THREE.MeshLambertMaterial> | null = null;
 	private fireFx: FireFxInstance[] = [];
 	private detailTextureRefs: {
 		grassCard: THREE.Texture | null;
@@ -136,6 +135,7 @@ export class HexWorldGame implements DisposeBag {
 	};
 	private grassCardMaterial: THREE.MeshLambertMaterial | null = null;
 	private leafCardMaterial: THREE.MeshLambertMaterial | null = null;
+	private treeLeafBlockMaterial: THREE.MeshLambertMaterial | null = null;
 	private smokeSpriteMaterial: THREE.SpriteMaterial | null = null;
 	private fireSpriteMaterial: THREE.SpriteMaterial | null = null;
 	private detailDirty = true;
@@ -200,10 +200,10 @@ export class HexWorldGame implements DisposeBag {
 		const renderRadiusRaw = Number.parseInt(this.urlParams.get('rr') || '', 10);
 		this.renderRadius =
 			Number.isFinite(renderRadiusRaw) && renderRadiusRaw >= 8
-				? Math.min(90, renderRadiusRaw)
+				? Math.min(128, renderRadiusRaw)
 				: this.touchUiEnabled
-					? 18
-					: 24;
+					? 72
+					: 96;
 		this.renderWindowRecenterDistance = Math.max(2, Math.floor(this.renderRadius * 0.2));
 
 		this.scene = new THREE.Scene();
@@ -220,7 +220,7 @@ export class HexWorldGame implements DisposeBag {
 		this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 		this.renderer.shadowMap.enabled = false;
 
-		this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 280);
+		this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 620);
 		this.cameraCtrl = new FirstPersonCameraController(this.camera);
 		this.scene.add(this.cameraCtrl.yawObject);
 
@@ -347,6 +347,10 @@ export class HexWorldGame implements DisposeBag {
 			alphaTest: 0.48,
 			side: THREE.DoubleSide
 		});
+		this.treeLeafBlockMaterial = new THREE.MeshLambertMaterial({
+			map: (this.mats.grass[1] as THREE.MeshLambertMaterial).map ?? undefined,
+			color: 0x7eb05e
+		});
 		this.smokeSpriteMaterial = new THREE.SpriteMaterial({
 			map: smoke ?? undefined,
 			color: 0xe5e5e5,
@@ -370,6 +374,8 @@ export class HexWorldGame implements DisposeBag {
 		this.grassCardMaterial = null;
 		this.leafCardMaterial?.dispose();
 		this.leafCardMaterial = null;
+		this.treeLeafBlockMaterial?.dispose();
+		this.treeLeafBlockMaterial = null;
 		this.smokeSpriteMaterial?.dispose();
 		this.smokeSpriteMaterial = null;
 		this.fireSpriteMaterial?.dispose();
@@ -919,7 +925,7 @@ export class HexWorldGame implements DisposeBag {
 		}
 		this.fireFx = [];
 
-		const instanced = [this.grassCardsA, this.grassCardsB, this.treeTrunks, this.treeLeavesA, this.treeLeavesB];
+		const instanced = [this.grassCardsA, this.grassCardsB, this.treeTrunkBlocks, this.treeLeafBlocks];
 		for (const mesh of instanced) {
 			if (!mesh) continue;
 			this.detailGroup.remove(mesh);
@@ -927,9 +933,8 @@ export class HexWorldGame implements DisposeBag {
 		}
 		this.grassCardsA = null;
 		this.grassCardsB = null;
-		this.treeTrunks = null;
-		this.treeLeavesA = null;
-		this.treeLeavesB = null;
+		this.treeTrunkBlocks = null;
+		this.treeLeafBlocks = null;
 		this.detailDirty = true;
 		this.detailCenterQ = Number.NaN;
 		this.detailCenterR = Number.NaN;
@@ -963,7 +968,7 @@ export class HexWorldGame implements DisposeBag {
 		this.detailCenterR = ax.r;
 
 		this.rebuildGrassCards(ax.q, ax.r);
-		if (this.currentBiome.id === 'grassland-origins' && !this.treeTrunks) this.buildStonehengeTrees();
+		if (this.currentBiome.id === 'grassland-origins') this.buildStonehengeTrees(ax.q, ax.r);
 		this.rebuildFireFx();
 		this.detailDirty = false;
 	}
@@ -981,9 +986,10 @@ export class HexWorldGame implements DisposeBag {
 			this.grassCardsB = null;
 		}
 
-		const radius = Math.max(10, Math.min(this.renderRadius - 2, 15));
+		const biomeRadius = this.currentBiome?.radius ?? this.renderRadius;
+		const radius = Math.max(10, Math.min(this.renderRadius - 2, biomeRadius));
 		const cells: Array<{ q: number; r: number; phase: number }> = [];
-		const maxCards = this.touchUiEnabled ? 520 : 780;
+		const maxCards = this.touchUiEnabled ? 900 : 1700;
 
 		for (let dq = -radius; dq <= radius; dq++) {
 			const drMin = Math.max(-radius, -dq - radius);
@@ -995,8 +1001,11 @@ export class HexWorldGame implements DisposeBag {
 				if (topY < 1) continue;
 				if (this.world.getType(q, r, topY) !== 'grass') continue;
 				if (this.world.getType(q, r, topY + 1)) continue;
+				const d = hexDist(centerQ, centerR, q, r);
+				const near = d <= 16;
 				const p = hash2(q * 1.17, r * 1.31);
-				if (p < 0.52) continue;
+				const threshold = near ? 0.5 : 0.86 + (d / Math.max(1, radius)) * 0.1;
+				if (p < threshold) continue;
 				cells.push({ q, r, phase: p * Math.PI * 2 });
 				if (cells.length >= maxCards) break;
 			}
@@ -1038,22 +1047,34 @@ export class HexWorldGame implements DisposeBag {
 		this.detailGroup.add(a, b);
 	}
 
-	private buildStonehengeTrees(): void {
-		if (!this.leafCardMaterial) return;
+	private buildStonehengeTrees(centerQ: number, centerR: number): void {
+		if (!this.treeLeafBlockMaterial) return;
 		const manifest = this.currentBiome;
 		if (!manifest || manifest.id !== 'grassland-origins') return;
+		if (this.treeTrunkBlocks) {
+			this.detailGroup.remove(this.treeTrunkBlocks);
+			this.treeTrunkBlocks.geometry.dispose();
+			this.treeTrunkBlocks = null;
+		}
+		if (this.treeLeafBlocks) {
+			this.detailGroup.remove(this.treeLeafBlocks);
+			this.treeLeafBlocks.geometry.dispose();
+			this.treeLeafBlocks = null;
+		}
 		const scale = STONEHENGE_PLAN_SCALE;
 		const pathSet = new Set(this.scalePlanCells(STONEHENGE_PLAN.pathCells, scale).map((c) => `${c.q},${c.r}`));
 		const waterSet = new Set(this.scalePlanCells(STONEHENGE_PLAN.waterCells, scale).map((c) => `${c.q},${c.r}`));
 		const hutSet = new Set(this.scalePlanCells(STONEHENGE_PLAN.hutCenters, scale).map((c) => `${c.q},${c.r}`));
 
-		const anchors: Array<{ q: number; r: number; trunkH: number; phase: number }> = [];
+		const anchors: Array<{ q: number; r: number; trunkBlocks: number }> = [];
 		const blocked = new Set<string>();
 		const radius = manifest.radius - 2;
+		const visibleRadius = Math.max(10, Math.min(this.renderRadius - 2, radius));
 		for (let q = -radius; q <= radius; q++) {
 			for (let r = -radius; r <= radius; r++) {
 				const d = hexDist(0, 0, q, r);
 				if (d > radius || d < 23) continue;
+				if (hexDist(centerQ, centerR, q, r) > visibleRadius) continue;
 				const ck = `${q},${r}`;
 				if (blocked.has(ck)) continue;
 				if (pathSet.has(ck) || waterSet.has(ck) || hutSet.has(ck)) continue;
@@ -1061,8 +1082,8 @@ export class HexWorldGame implements DisposeBag {
 				const topY = this.world.getTopSolidY(q, r);
 				if (topY < 2) continue;
 				if (this.world.getType(q, r, topY) !== 'grass') continue;
-				const trunkH = 2.8 + hash2(q * 1.9, r * 2.1) * 1.9;
-				anchors.push({ q, r, trunkH, phase: hash2(q * 2.33, r * 1.41) * Math.PI * 2 });
+				const trunkBlocks = 3 + Math.floor(hash2(q * 1.9, r * 2.1) * 3);
+				anchors.push({ q, r, trunkBlocks });
 				for (const dq of [-2, -1, 0, 1, 2]) {
 					for (const dr of [-2, -1, 0, 1, 2]) {
 						if (hexDist(0, 0, dq, dr) > 2) continue;
@@ -1073,45 +1094,59 @@ export class HexWorldGame implements DisposeBag {
 		}
 		if (!anchors.length) return;
 
-		const trunkGeo = new THREE.CylinderGeometry(0.18, 0.26, 1, 6, 1, false);
+		const trunkGeo = new THREE.CylinderGeometry(HEX_RADIUS, HEX_RADIUS, BLOCK_H, 6, 1, false);
 		trunkGeo.rotateY(Math.PI / 6);
-		const leafGeo = new THREE.PlaneGeometry(3.2, 3.0, 1, 1);
+		const leafGeo = trunkGeo.clone();
 		const trunkMat = this.mats.timber[0] as THREE.MeshLambertMaterial;
-		const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, anchors.length);
-		const leavesA = new THREE.InstancedMesh(leafGeo, this.leafCardMaterial, anchors.length);
-		const leavesB = new THREE.InstancedMesh(leafGeo.clone(), this.leafCardMaterial, anchors.length);
+		const trunkCells: Array<{ q: number; r: number; y: number }> = [];
+		const leafCells = new Set<string>();
+		for (const a of anchors) {
+			const baseY = this.world.getTopSolidY(a.q, a.r) + 1;
+			for (let i = 0; i < a.trunkBlocks; i++) {
+				trunkCells.push({ q: a.q, r: a.r, y: baseY + i });
+			}
+			const crownY = baseY + a.trunkBlocks - 1;
+			for (let dq = -2; dq <= 2; dq++) {
+				for (let dr = -2; dr <= 2; dr++) {
+					const hd = hexDist(0, 0, dq, dr);
+					if (hd > 2) continue;
+					const q = a.q + dq;
+					const r = a.r + dr;
+					for (let ly = crownY; ly <= crownY + 2; ly++) {
+						if (ly === crownY + 2 && hd > 1) continue;
+						leafCells.add(`${q},${r},${ly}`);
+					}
+				}
+			}
+		}
 
-		for (let i = 0; i < anchors.length; i++) {
-			const a = anchors[i];
-			const w = axialToWorld(a.q, a.r);
-			const ground = this.world.getGroundY(a.q, a.r);
-			const width = 0.78 + hash2(a.q * 0.91, a.r * 1.07) * 0.36;
-			const crown = 0.95 + hash2(a.q * 1.41, a.r * 1.69) * 0.62;
-
-			this.tmpObject.position.set(w.x, ground + a.trunkH * 0.5, w.z);
-			this.tmpObject.rotation.set(0, a.phase, 0);
-			this.tmpObject.scale.set(width, a.trunkH, width);
+		const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, trunkCells.length);
+		const leaves = new THREE.InstancedMesh(leafGeo, this.treeLeafBlockMaterial, leafCells.size);
+		for (let i = 0; i < trunkCells.length; i++) {
+			const c = trunkCells[i];
+			const w = axialToWorld(c.q, c.r);
+			this.tmpObject.position.set(w.x, (c.y + 0.5) * BLOCK_H, w.z);
+			this.tmpObject.rotation.set(0, 0, 0);
+			this.tmpObject.scale.set(1, 1, 1);
 			this.tmpObject.updateMatrix();
 			trunks.setMatrixAt(i, this.tmpObject.matrix);
-
-			this.tmpObject.position.set(w.x, ground + a.trunkH + 0.95, w.z);
-			this.tmpObject.rotation.set(0, a.phase, 0);
-			this.tmpObject.scale.set(crown, crown, crown);
+		}
+		let li = 0;
+		for (const k of leafCells) {
+			const [q, r, y] = k.split(',').map((p) => Number.parseInt(p, 10));
+			const w = axialToWorld(q, r);
+			this.tmpObject.position.set(w.x, (y + 0.5) * BLOCK_H, w.z);
+			this.tmpObject.rotation.set(0, 0, 0);
+			this.tmpObject.scale.set(1, 1, 1);
 			this.tmpObject.updateMatrix();
-			leavesA.setMatrixAt(i, this.tmpObject.matrix);
-
-			this.tmpObject.rotation.set(0, a.phase + Math.PI * 0.5, 0);
-			this.tmpObject.updateMatrix();
-			leavesB.setMatrixAt(i, this.tmpObject.matrix);
+			leaves.setMatrixAt(li++, this.tmpObject.matrix);
 		}
 
 		trunks.instanceMatrix.needsUpdate = true;
-		leavesA.instanceMatrix.needsUpdate = true;
-		leavesB.instanceMatrix.needsUpdate = true;
-		this.treeTrunks = trunks;
-		this.treeLeavesA = leavesA;
-		this.treeLeavesB = leavesB;
-		this.detailGroup.add(trunks, leavesA, leavesB);
+		leaves.instanceMatrix.needsUpdate = true;
+		this.treeTrunkBlocks = trunks;
+		this.treeLeafBlocks = leaves;
+		this.detailGroup.add(trunks, leaves);
 	}
 
 	private rebuildFireFx(): void {
@@ -1227,12 +1262,16 @@ export class HexWorldGame implements DisposeBag {
 		body.position.set(0, 0.88, 0);
 		const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.52, 0.18), pants);
 		legL.position.set(-0.11, 0.26, 0);
+		legL.name = 'legL';
 		const legR = legL.clone();
 		legR.position.set(0.11, 0.26, 0);
+		legR.name = 'legR';
 		const armL = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.5, 0.14), skin);
 		armL.position.set(-0.34, 0.88, 0);
+		armL.name = 'armL';
 		const armR = armL.clone();
 		armR.position.set(0.34, 0.88, 0);
+		armR.name = 'armR';
 		g.add(head, body, legL, legR, armL, armR);
 		return g;
 	}
@@ -1251,26 +1290,28 @@ export class HexWorldGame implements DisposeBag {
 		const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.42, 0.36), fur);
 		body.position.set(0, 0.53, 0);
 		const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.24), fur);
-		head.position.set(0.42, 0.56, 0);
+		head.position.set(0, 0.56, 0.42);
 		const snout = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.1), dark);
-		snout.position.set(0.58, 0.52, 0);
+		snout.position.set(0, 0.52, 0.58);
 		const legGeo = new THREE.BoxGeometry(0.12, 0.34, 0.12);
 		const legOffsets: Array<[number, number]> = [
 			[-0.22, -0.12],
-			[-0.22, 0.12],
 			[0.22, -0.12],
+			[-0.22, 0.12],
 			[0.22, 0.12]
 		];
-		for (const [x, z] of legOffsets) {
+		for (let i = 0; i < legOffsets.length; i++) {
+			const [x, z] = legOffsets[i];
 			const leg = new THREE.Mesh(legGeo, dark);
 			leg.position.set(x, 0.17, z);
+			leg.name = `leg${i}`;
 			g.add(leg);
 		}
 		if (species === 'aurochs' || species === 'boar') {
 			const horn = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), dark);
 			const horn2 = horn.clone();
-			horn.position.set(0.34, 0.71, -0.1);
-			horn2.position.set(0.34, 0.71, 0.1);
+			horn.position.set(-0.1, 0.71, 0.34);
+			horn2.position.set(0.1, 0.71, 0.34);
 			g.add(horn, horn2);
 		}
 		g.add(body, head, snout);
@@ -1328,6 +1369,8 @@ export class HexWorldGame implements DisposeBag {
 				anchorR: anchor.r,
 				groundOffset,
 				idleUntilMs: 0,
+				yawOffset: 0,
+				walkCycle: Math.random() * Math.PI * 2,
 				speed: kind === 'animal' ? 1.05 + Math.random() * 0.85 : 0.78 + Math.random() * 0.72,
 				phase: Math.random() * Math.PI * 2,
 				targetQ: s.q,
@@ -1386,13 +1429,56 @@ export class HexWorldGame implements DisposeBag {
 		npc.targetR = npc.anchorR;
 	}
 
+	private animateNpcRig(npc: NpcInstance, dt: number, moving: boolean): void {
+		const cycleSpeed = moving ? 7.2 + npc.speed * 1.2 : 1.8;
+		npc.walkCycle += dt * cycleSpeed;
+		const wave = Math.sin(npc.walkCycle);
+
+		if (npc.kind === 'villager') {
+			const legL = npc.group.getObjectByName('legL') as THREE.Mesh | undefined;
+			const legR = npc.group.getObjectByName('legR') as THREE.Mesh | undefined;
+			const armL = npc.group.getObjectByName('armL') as THREE.Mesh | undefined;
+			const armR = npc.group.getObjectByName('armR') as THREE.Mesh | undefined;
+			const legTarget = moving ? wave * 0.55 : wave * 0.06;
+			const armTarget = moving ? -wave * 0.45 : -wave * 0.04;
+			if (legL) legL.rotation.x += (legTarget - legL.rotation.x) * Math.min(1, dt * 12);
+			if (legR) legR.rotation.x += (-legTarget - legR.rotation.x) * Math.min(1, dt * 12);
+			if (armL) armL.rotation.x += (armTarget - armL.rotation.x) * Math.min(1, dt * 12);
+			if (armR) armR.rotation.x += (-armTarget - armR.rotation.x) * Math.min(1, dt * 12);
+			return;
+		}
+
+		const leg0 = npc.group.getObjectByName('leg0') as THREE.Mesh | undefined;
+		const leg1 = npc.group.getObjectByName('leg1') as THREE.Mesh | undefined;
+		const leg2 = npc.group.getObjectByName('leg2') as THREE.Mesh | undefined;
+		const leg3 = npc.group.getObjectByName('leg3') as THREE.Mesh | undefined;
+		const stride = moving ? wave * 0.36 : wave * 0.03;
+		if (leg0) leg0.rotation.x += (stride - leg0.rotation.x) * Math.min(1, dt * 12);
+		if (leg3) leg3.rotation.x += (stride - leg3.rotation.x) * Math.min(1, dt * 12);
+		if (leg1) leg1.rotation.x += (-stride - leg1.rotation.x) * Math.min(1, dt * 12);
+		if (leg2) leg2.rotation.x += (-stride - leg2.rotation.x) * Math.min(1, dt * 12);
+	}
+
+	private yawDelta(current: number, target: number): number {
+		let d = target - current;
+		while (d > Math.PI) d -= Math.PI * 2;
+		while (d < -Math.PI) d += Math.PI * 2;
+		return d;
+	}
+
 	private updateNpcs(dt: number, nowMs: number): void {
+		const playerAx = this.currentAxialUnderPlayer();
 		for (const npc of this.npcs) {
+			const visible = hexDist(playerAx.q, playerAx.r, npc.q, npc.r) <= this.renderRadius;
+			npc.group.visible = visible;
+			if (!visible) continue;
+
 			if (npc.idleUntilMs > nowMs) {
 				const ax = worldToAxial(npc.group.position.x, npc.group.position.z);
 				const ground = this.world.getGroundY(ax.q, ax.r);
 				const bob = npc.kind === 'animal' ? 0.01 : 0.015;
 				npc.group.position.y = ground + npc.groundOffset + Math.sin(nowMs * 0.005 + npc.phase) * bob;
+				this.animateNpcRig(npc, dt, false);
 				continue;
 			}
 
@@ -1414,9 +1500,16 @@ export class HexWorldGame implements DisposeBag {
 			}
 
 			const step = Math.min(dist, npc.speed * dt);
-			npc.group.position.x += (dx / Math.max(EPS, dist)) * step;
-			npc.group.position.z += (dz / Math.max(EPS, dist)) * step;
-			npc.group.rotation.y = Math.atan2(-dx, -dz);
+			const desiredYaw = Math.atan2(dx, dz) + npc.yawOffset;
+			const yd = this.yawDelta(npc.group.rotation.y, desiredYaw);
+			npc.group.rotation.y += yd * Math.min(1, dt * 10.5);
+			const moveYaw = npc.group.rotation.y - npc.yawOffset;
+			const forwardX = Math.sin(moveYaw);
+			const forwardZ = Math.cos(moveYaw);
+			const along = Math.max(0, dx * forwardX + dz * forwardZ);
+			const move = Math.min(step, along);
+			npc.group.position.x += forwardX * move;
+			npc.group.position.z += forwardZ * move;
 
 			const ax = worldToAxial(npc.group.position.x, npc.group.position.z);
 			npc.q = ax.q;
@@ -1424,6 +1517,7 @@ export class HexWorldGame implements DisposeBag {
 			const ground = this.world.getGroundY(ax.q, ax.r);
 			const bobAmp = npc.kind === 'animal' ? 0.014 : 0.019;
 			npc.group.position.y = ground + npc.groundOffset + Math.sin(nowMs * 0.006 + npc.phase) * bobAmp;
+			this.animateNpcRig(npc, dt, true);
 		}
 	}
 

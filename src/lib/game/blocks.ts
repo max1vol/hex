@@ -74,6 +74,15 @@ export function createBlockMaterials(): BlockMaterialMap {
 	const dirtBottom = createMaterial('dirt');
 	mats.grass = [grassSide, grassTop, dirtBottom];
 
+	const fireSide = createMaterial('fire');
+	const fireCap = new THREE.MeshLambertMaterial({
+		color: 0xffffff,
+		transparent: true,
+		opacity: 0,
+		depthWrite: false
+	});
+	mats.fire = [fireSide, fireCap.clone(), fireCap];
+
 	return mats;
 }
 
@@ -94,8 +103,8 @@ export async function loadBlockTextures(
 	const loaded = await Promise.all(
 		textureEntries.map(async ([key, path]) => {
 			const tex = await loadTexture(renderer, loader, path, {
-				wrapS: THREE.RepeatWrapping,
-				wrapT: THREE.RepeatWrapping,
+				wrapS: key === 'fire' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping,
+				wrapT: key === 'fire' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping,
 				minFilter: THREE.LinearMipmapLinearFilter,
 				magFilter: THREE.LinearFilter
 			});
@@ -130,7 +139,6 @@ export async function loadBlockTextures(
 	assign('art', 'art');
 	assign('timber', 'timber');
 	assign('thatch', 'thatch');
-	assign('fire', 'fire');
 
 	const grassTop = texMap.get('grass_top') ?? null;
 	const grassSide = texMap.get('grass_side') ?? null;
@@ -156,7 +164,21 @@ export async function loadBlockTextures(
 
 	refs.sand = texMap.get('sand') ?? null;
 	refs.water = texMap.get('water') ?? null;
-	refs.fire = texMap.get('fire') ?? null;
+	const fireTex = texMap.get('fire') ?? null;
+	if (fireTex) {
+		const fireMats = mats.fire as THREE.MeshLambertMaterial[];
+		fireMats[0].map = fireTex;
+		fireMats[0].color.set(0xffffff);
+		fireMats[0].needsUpdate = true;
+		for (let i = 1; i < fireMats.length; i++) {
+			fireMats[i].map = null;
+			fireMats[i].transparent = true;
+			fireMats[i].opacity = 0;
+			fireMats[i].depthWrite = false;
+			fireMats[i].needsUpdate = true;
+		}
+	}
+	refs.fire = fireTex;
 	return refs;
 }
 

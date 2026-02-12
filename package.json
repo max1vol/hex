@@ -12,6 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test:unit": "vitest run",
 		"test:e2e": "playwright test",
+		"render:block-angles": "playwright test tests/e2e/block-inspect.spec.ts",
 		"test": "npm run test:unit",
 		"stonehenge:extract-plan": "tsx scripts/stonehenge/extract-plan-from-mask.ts",
 		"stonehenge:render": "tsx scripts/stonehenge/render-map.ts",
