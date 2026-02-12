@@ -7,4 +7,5 @@ test('stonehenge debug endpoint renders split views', async ({ page }) => {
 	await expect(topCanvas).toBeVisible();
 	await expect(page.locator('text=Unsupported stone columns')).toBeVisible();
 	expect(await page.locator('img').count()).toBeGreaterThan(0);
+	await page.screenshot({ path: 'docs/images/stonehenge-debug-playwright.png', fullPage: true });
 });

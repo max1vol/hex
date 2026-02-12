@@ -35,7 +35,10 @@ export function normalizeInspectBlockType(type: string): BlockType {
 		type === 'ice' ||
 		type === 'metal' ||
 		type === 'asphalt' ||
-		type === 'art'
+		type === 'art' ||
+		type === 'timber' ||
+		type === 'thatch' ||
+		type === 'fire'
 	)
 		return type;
 	return 'grass';

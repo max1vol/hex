@@ -316,6 +316,10 @@ function classifyTone(typeKey: BlockType): SurfaceTone {
 			return 'sand';
 		case 'metal':
 			return 'metal';
+		case 'timber':
+		case 'thatch':
+		case 'fire':
+			return 'earth';
 		case 'ice':
 		case 'water':
 			return 'glass';

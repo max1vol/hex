@@ -18,10 +18,10 @@ export const BIOMES: BiomeManifest[] = [
 		yearLabel: 'c. 2500 BCE',
 		description: 'A vast active Stonehenge landscape with processional avenues, hearth villages, and pasture.',
 		radius: 64,
-		seaLevel: 6,
+		seaLevel: 2,
 		heightBoost: 9,
 		noiseScale: 0.88,
-		palette: ['grass', 'dirt', 'stone', 'sand', 'water', 'bedrock'],
+		palette: ['grass', 'dirt', 'stone', 'sand', 'water', 'bedrock', 'timber', 'thatch', 'fire'],
 		blockSet: {
 			surface: 'grass',
 			subsurface: 'dirt',

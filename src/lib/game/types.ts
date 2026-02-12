@@ -12,7 +12,10 @@ export type BlockType =
 	| 'ice'
 	| 'metal'
 	| 'asphalt'
-	| 'art';
+	| 'art'
+	| 'timber'
+	| 'thatch'
+	| 'fire';
 
 export type WeatherKind = 'clear' | 'rain' | 'snow' | 'mist';
 
@@ -77,6 +80,7 @@ export interface GameStatePayload {
 	muted: boolean;
 	selected: BlockType | null;
 	blocks: number;
+	fps?: number;
 	biomeId?: string;
 	weather?: WeatherKind;
 	timeOfDay?: string;

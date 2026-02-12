@@ -20,7 +20,10 @@
 		ice: '#9dd4ee',
 		metal: '#7f8c9b',
 		asphalt: '#3a3f44',
-		art: '#d768aa'
+		art: '#d768aa',
+		timber: '#8d613e',
+		thatch: '#c9ab72',
+		fire: '#f19245'
 	};
 
 	let topCanvas: HTMLCanvasElement;
@@ -32,6 +35,7 @@
 	let maxY = 0;
 	let totalBlocks = 0;
 	let stoneColumns = 0;
+	let exposedStoneColumns = 0;
 	let unsupportedStoneColumns = 0;
 	let ceremonialStoneColumns = 0;
 	let sliceR = 0;
@@ -108,6 +112,7 @@
 		}
 
 		let stoneCols = 0;
+		let exposedCols = 0;
 		let unsupportedCols = 0;
 		let ceremonialCols = 0;
 		const checked = new Set<string>();
@@ -130,7 +135,11 @@
 			if (!Number.isFinite(minStoneY)) continue;
 			if (!getBlock(sq, sr, minStoneY - 1)) unsupportedCols++;
 		}
+		for (const [, top] of topByColumn.entries()) {
+			if (top.type === 'stone') exposedCols++;
+		}
 		stoneColumns = stoneCols;
+		exposedStoneColumns = exposedCols;
 		unsupportedStoneColumns = unsupportedCols;
 		ceremonialStoneColumns = ceremonialCols;
 	}
@@ -271,6 +280,7 @@
 		<div><b>Total blocks:</b> {totalBlocks}</div>
 		<div><b>Max y:</b> {maxY}</div>
 		<div><b>Stone columns:</b> {stoneColumns}</div>
+		<div><b>Exposed stone columns:</b> {exposedStoneColumns}</div>
 		<div><b>Ceremonial stone columns:</b> {ceremonialStoneColumns}</div>
 		<div><b>Unsupported stone columns:</b> {unsupportedStoneColumns}</div>
 	</div>

@@ -30,12 +30,16 @@ export function updateHotbar(hotbar: HTMLDivElement, selectedPaletteIdx: number)
 }
 
 export function setHudRows(hud: HTMLDivElement, rows: Array<{ label: string; value: string }>): void {
-	hud.innerHTML = rows
+	hud.classList.toggle('compact', rows.length <= 1);
+	const html = rows
 		.map(
 			(row) =>
 				`<div class="row"><span class="label">${escapeHtml(row.label)}</span><span>${row.value}</span></div>`
 		)
 		.join('');
+	if (hud.dataset.rows === html) return;
+	hud.dataset.rows = html;
+	hud.innerHTML = html;
 }
 
 function escapeHtml(str: string): string {

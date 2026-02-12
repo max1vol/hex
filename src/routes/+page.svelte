@@ -190,11 +190,23 @@
 		z-index: 5;
 	}
 
+	:global(#hud.compact) {
+		min-width: 0;
+		padding: 6px 10px;
+		border-radius: 10px;
+		background: rgba(8, 12, 22, 0.56);
+	}
+
 	#hud :global(.row) {
 		display: flex;
 		justify-content: space-between;
 		gap: 12px;
 		margin: 2px 0;
+	}
+
+	:global(#hud.compact .row) {
+		gap: 8px;
+		margin: 0;
 	}
 
 	#hud :global(.label) {

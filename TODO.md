@@ -22,6 +22,14 @@ All previously listed near-term engineering and design tasks are implemented in 
 - [x] Added a unit regression test to detect unsupported/floating Stonehenge stone columns.
 - [x] Added Playwright debug screenshot coverage for the Stonehenge debug endpoint.
 
+## Latest update (2026-02-12, FPS + HUD pass)
+
+- [x] Switched gameplay HUD default to a single FPS line; full debug overlay now behind URL params (`?hud=full` or `?overlay=1`).
+- [x] Added dynamic render-window culling around the player (full world data retained, only nearby blocks rendered) to improve FPS and initial load time.
+- [x] Reduced render cost defaults (no antialias by default, capped pixel ratio, shorter camera far plane) with URL overrides for captures.
+- [x] Removed startup controls toast/dialog noise from default gameplay flow.
+- [x] Added unit coverage for render-window behavior and stabilized Playwright startup timeout handling.
+
 ## Current state
 
 - [x] Core sandbox rebuilt into a modular multi-biome game loop.

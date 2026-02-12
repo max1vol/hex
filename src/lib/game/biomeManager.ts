@@ -54,9 +54,11 @@ export class BiomeManager {
 		const data = generateBiomeTerrain(manifest, seed);
 
 		world.clear();
+		world.beginBatch();
 		for (const block of data.blocks) {
 			world.add(block.q, block.r, block.y, block.type);
 		}
+		world.endBatch();
 
 		this.currentBiomeId = manifest.id;
 		this.currentBaseBlocks = data.baseBlocks;
@@ -114,8 +116,10 @@ export class BiomeManager {
 		}
 
 		this.biomeEdits.clear();
+		const saveVersion = Number.isFinite(parsed.version) ? parsed.version : 1;
 		for (const [biomeId, edits] of Object.entries(parsed.biomeEdits ?? makeEmptyEdits())) {
 			if (!BIOME_BY_ID.has(biomeId)) continue;
+			if (saveVersion < 2 && biomeId === 'grassland-origins') continue;
 			const m = new Map<string, BlockType | null>();
 			for (const [k, val] of Object.entries(edits)) {
 				if (val === null || typeof val === 'string') m.set(k, val as BlockType | null);
@@ -137,7 +141,7 @@ export class BiomeManager {
 			for (const [k, val] of edits.entries()) editsObj[biomeId][k] = val;
 		}
 		const payload: SaveState = {
-			version: 1,
+			version: 2,
 			currentBiomeId,
 			unlockedBiomes: [...this.unlocked],
 			biomeEdits: editsObj

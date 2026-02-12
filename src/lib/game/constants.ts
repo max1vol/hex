@@ -44,10 +44,25 @@ export const BLOCK_DEFINITIONS: Record<BlockType, BlockDefinition> = {
 	},
 	metal: { key: 'metal', label: 'Metal', color: 0x9aa7b4, tex: '/textures/metal.png' },
 	asphalt: { key: 'asphalt', label: 'Asphalt', color: 0x2d3137, tex: '/textures/asphalt.png' },
-	art: { key: 'art', label: 'Street Art', color: 0xfc5fa4, tex: '/textures/street_art.png', emissive: 0x2f1236 }
+	art: { key: 'art', label: 'Street Art', color: 0xfc5fa4, tex: '/textures/street_art.png', emissive: 0x2f1236 },
+	timber: { key: 'timber', label: 'Timber', color: 0x8a5b38, tex: '/textures/timber.png' },
+	thatch: { key: 'thatch', label: 'Thatch', color: 0xd1b27a, tex: '/textures/thatch.png' },
+	fire: { key: 'fire', label: 'Fire', color: 0xffa14c, tex: '/textures/fire.png', emissive: 0x8a3100, transparent: true, opacity: 0.88 }
 };
 
-const BUILD_KEYS: BlockType[] = ['grass', 'dirt', 'stone', 'sand', 'brick', 'metal', 'asphalt', 'art'];
+const BUILD_KEYS: BlockType[] = [
+	'grass',
+	'dirt',
+	'stone',
+	'sand',
+	'timber',
+	'thatch',
+	'brick',
+	'metal',
+	'asphalt',
+	'art',
+	'fire'
+];
 
 export const PALETTE: PaletteItem[] = BUILD_KEYS.map((key) => BLOCK_DEFINITIONS[key]);
 
@@ -62,5 +77,7 @@ export const SOLID_BLOCKS = new Set<BlockType>([
 	'snow',
 	'metal',
 	'asphalt',
-	'art'
+	'art',
+	'timber',
+	'thatch'
 ]);

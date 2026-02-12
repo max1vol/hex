@@ -15,7 +15,10 @@ const ALL_BLOCK_TYPES: BlockType[] = [
 	'ice',
 	'metal',
 	'asphalt',
-	'art'
+	'art',
+	'timber',
+	'thatch',
+	'fire'
 ];
 
 const TEXTURE_PATHS: Record<string, string> = {
@@ -31,7 +34,10 @@ const TEXTURE_PATHS: Record<string, string> = {
 	ice: '/textures/ice.png',
 	metal: '/textures/metal.png',
 	asphalt: '/textures/asphalt.png',
-	art: '/textures/street_art.png'
+	art: '/textures/street_art.png',
+	timber: '/textures/timber.png',
+	thatch: '/textures/thatch.png',
+	fire: '/textures/fire.png'
 };
 
 export interface AnimatedTextureRefs {
@@ -39,25 +45,19 @@ export interface AnimatedTextureRefs {
 	grassSide: THREE.Texture | null;
 	sand: THREE.Texture | null;
 	water: THREE.Texture | null;
+	fire: THREE.Texture | null;
 }
 
-function createMaterial(type: BlockType): THREE.MeshStandardMaterial {
+function createMaterial(type: BlockType): THREE.MeshLambertMaterial {
 	const def = BLOCK_DEFINITIONS[type];
-	const mat = new THREE.MeshStandardMaterial({
+	const mat = new THREE.MeshLambertMaterial({
 		color: def.color,
-		roughness: type === 'metal' ? 0.34 : 0.92,
-		metalness: type === 'metal' ? 0.62 : 0,
 		transparent: def.transparent ?? false,
 		opacity: def.opacity ?? 1,
 		emissive: new THREE.Color(def.emissive ?? 0x000000)
 	});
-	if (type === 'water') {
-		mat.roughness = 0.2;
-		mat.metalness = 0.04;
-	}
-	if (type === 'ice') {
-		mat.roughness = 0.1;
-		mat.metalness = 0.08;
+	if (type === 'fire') {
+		mat.depthWrite = false;
 	}
 	return mat;
 }
@@ -86,7 +86,8 @@ export async function loadBlockTextures(
 		grassTop: null,
 		grassSide: null,
 		sand: null,
-		water: null
+		water: null,
+		fire: null
 	};
 
 	const textureEntries = Object.entries(TEXTURE_PATHS);
@@ -108,7 +109,7 @@ export async function loadBlockTextures(
 	const assign = (type: BlockType, textureKey: string): void => {
 		const t = texMap.get(textureKey);
 		if (!t) return;
-		const materials = mats[type] as THREE.MeshStandardMaterial[];
+		const materials = mats[type] as THREE.MeshLambertMaterial[];
 		for (const mat of materials) {
 			mat.map = t;
 			mat.color.set(0xffffff);
@@ -127,10 +128,13 @@ export async function loadBlockTextures(
 	assign('metal', 'metal');
 	assign('asphalt', 'asphalt');
 	assign('art', 'art');
+	assign('timber', 'timber');
+	assign('thatch', 'thatch');
+	assign('fire', 'fire');
 
 	const grassTop = texMap.get('grass_top') ?? null;
 	const grassSide = texMap.get('grass_side') ?? null;
-	const grassMats = mats.grass as THREE.MeshStandardMaterial[];
+	const grassMats = mats.grass as THREE.MeshLambertMaterial[];
 	if (grassTop) {
 		grassMats[1].map = grassTop;
 		grassMats[1].color.set(0xffffff);
@@ -152,6 +156,7 @@ export async function loadBlockTextures(
 
 	refs.sand = texMap.get('sand') ?? null;
 	refs.water = texMap.get('water') ?? null;
+	refs.fire = texMap.get('fire') ?? null;
 	return refs;
 }
 
@@ -171,5 +176,9 @@ export function updateNatureTextureAnimation(refs: AnimatedTextureRefs, nowMs: n
 	if (refs.water) {
 		refs.water.offset.x = 0.025 * Math.sin(t * 0.7);
 		refs.water.offset.y = 0.03 * Math.cos(t * 0.56);
+	}
+	if (refs.fire) {
+		refs.fire.offset.y = 0.11 * t;
+		refs.fire.offset.x = 0.02 * Math.sin(t * 4.2);
 	}
 }

@@ -12,7 +12,7 @@ import {
 import { HexWorldAudio } from './audio';
 import { createBlockMaterials, loadBlockTextures, updateNatureTextureAnimation } from './blocks';
 import { BiomeManager } from './biomeManager';
-import { axialToWorld, worldToAxial } from './hex';
+import { axialToWorld, hexDist, worldToAxial } from './hex';
 import { InputController } from './input';
 import { normalizeInspectBlockType, readInspectConfig, readUrlParams } from './inspect';
 import type {
@@ -81,6 +81,15 @@ export class HexWorldGame implements DisposeBag {
 	private readonly highlight: BlockMesh;
 	private readonly inspect: InspectConfig;
 	private readonly urlParams: URLSearchParams;
+	private readonly hudVerbose: boolean;
+	private readonly hudUpdateIntervalMs: number;
+	private readonly renderRadius: number;
+	private readonly renderWindowRecenterDistance: number;
+	private lastHudUpdateAt = -Infinity;
+	private lastHighlightPickAt = -Infinity;
+	private cachedHighlightHit: PickHit | null = null;
+	private renderWindowCenterQ = Number.NaN;
+	private renderWindowCenterR = Number.NaN;
 
 	private readonly hemiLight: THREE.HemisphereLight;
 	private readonly sunLight: THREE.DirectionalLight;
@@ -138,6 +147,19 @@ export class HexWorldGame implements DisposeBag {
 		this.urlParams = readUrlParams();
 		this.inspect = readInspectConfig(this.urlParams);
 		this.inspectAngle = this.inspect.angle0;
+		this.hudVerbose = this.urlParams.get('hud') === 'full' || this.urlParams.get('overlay') === '1';
+		this.hudUpdateIntervalMs = this.hudVerbose ? 120 : 240;
+		const antialias = this.urlParams.get('aa') === '1';
+		const dpiCapRaw = Number.parseFloat(this.urlParams.get('dpi') || '');
+		const dpiCap = Number.isFinite(dpiCapRaw) && dpiCapRaw > 0 ? dpiCapRaw : 1.2;
+		const renderRadiusRaw = Number.parseInt(this.urlParams.get('rr') || '', 10);
+		this.renderRadius =
+			Number.isFinite(renderRadiusRaw) && renderRadiusRaw >= 8
+				? Math.min(90, renderRadiusRaw)
+				: this.touchUiEnabled
+					? 18
+					: 24;
+		this.renderWindowRecenterDistance = Math.max(2, Math.floor(this.renderRadius * 0.2));
 
 		this.scene = new THREE.Scene();
 		this.scene.background = new THREE.Color(0x97b6d3);
@@ -145,15 +167,15 @@ export class HexWorldGame implements DisposeBag {
 
 		this.renderer = new THREE.WebGLRenderer({
 			canvas: this.el.canvas,
-			antialias: true,
+			antialias,
 			powerPreference: 'high-performance'
 		});
-		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+		this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, dpiCap));
 		this.renderer.setSize(window.innerWidth, window.innerHeight, false);
 		this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 		this.renderer.shadowMap.enabled = false;
 
-		this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 900);
+		this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 280);
 		this.cameraCtrl = new FirstPersonCameraController(this.camera);
 		this.scene.add(this.cameraCtrl.yawObject);
 
@@ -234,12 +256,6 @@ export class HexWorldGame implements DisposeBag {
 
 		this.setMenu(false);
 		this.bootstrapDone = true;
-		this.showToast(
-			this.touchUiEnabled
-				? 'Use left joystick to move and swipe right side to look.'
-				: 'Click to capture mouse. E near a portal to travel.',
-			3600
-		);
 	}
 
 	private installGlobalHooks(): void {
@@ -256,6 +272,7 @@ export class HexWorldGame implements DisposeBag {
 				muted: this.audio.isMuted(),
 				selected: PALETTE[this.selectedPaletteIdx]?.key ?? null,
 				blocks: this.world.blocks.size,
+				fps: this.fps,
 				biomeId: this.currentBiome?.id,
 				weather: this.currentWeather,
 				timeOfDay: this.getClockString(),
@@ -720,7 +737,13 @@ export class HexWorldGame implements DisposeBag {
 	}
 
 	private loadBiome(biomeId: string, fromPortal: boolean): void {
+		const spawnCell = this.getSpawnCellForBiome(biomeId);
+		this.world.setRenderWindow(spawnCell.q, spawnCell.r, this.renderRadius);
+		this.renderWindowCenterQ = spawnCell.q;
+		this.renderWindowCenterR = spawnCell.r;
+
 		const { manifest, data } = this.biomeManager.loadIntoWorld(this.world, biomeId);
+		this.invalidateHighlightCache();
 		this.currentBiome = manifest;
 		this.portalHint = '';
 
@@ -734,25 +757,20 @@ export class HexWorldGame implements DisposeBag {
 		this.rollWeather(true);
 		this.updateEraBanner();
 
-		const spawnCell =
-			manifest.id === 'grassland-origins'
-				? {
-						q: -16,
-						r: 14
-					}
-				: {
-						q: 0,
-						r: 0
-					};
 		const spawn = axialToWorld(spawnCell.q, spawnCell.r);
 		const ground = this.world.getGroundY(spawnCell.q, spawnCell.r) + 0.02;
 		this.cameraCtrl.setFeetPosition(spawn.x, ground, spawn.z);
 		if (manifest.id === 'grassland-origins') {
 			this.cameraCtrl.lookAt(new THREE.Vector3(0, this.world.getGroundY(0, 0) + 3, 0));
 		}
+		this.updateRenderWindow(true);
 		this.biomeManager.saveCurrentState(manifest.id);
 		if (fromPortal) this.audio.playPortal();
 		if (fromPortal) this.showToast(`Arrived in ${manifest.place}`, 2200);
+	}
+
+	private getSpawnCellForBiome(biomeId: string): { q: number; r: number } {
+		return biomeId === 'grassland-origins' ? { q: -16, r: 14 } : { q: 0, r: 0 };
 	}
 
 	private clearPortals(): void {
@@ -1104,6 +1122,7 @@ export class HexWorldGame implements DisposeBag {
 			this.biomeManager.recordEdit(ud.q, ud.r, ud.y, null);
 			this.audio.playBreak(ud.typeKey ?? 'dirt');
 			if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
+			this.invalidateHighlightCache();
 		}
 	}
 
@@ -1122,6 +1141,7 @@ export class HexWorldGame implements DisposeBag {
 			this.biomeManager.recordEdit(n.q, n.r, n.y, typeKey);
 			this.audio.playPlace(typeKey);
 			if (this.currentBiome) this.biomeManager.saveCurrentState(this.currentBiome.id);
+			this.invalidateHighlightCache();
 		}
 	}
 
@@ -1156,12 +1176,27 @@ export class HexWorldGame implements DisposeBag {
 		return first;
 	}
 
-	private updateHighlight(): PickHit | null {
+	private invalidateHighlightCache(): void {
+		this.cachedHighlightHit = null;
+		this.lastHighlightPickAt = -Infinity;
+	}
+
+	private updateHighlight(nowMs: number): PickHit | null {
 		if (this.inspect.enabled || this.menuOpen || this.quizOpen) {
 			this.highlight.visible = false;
+			this.cachedHighlightHit = null;
 			return null;
 		}
-		const hit = this.pickBlock();
+		let hit = this.cachedHighlightHit;
+		const mustRepick =
+			!hit ||
+			!hit.object.parent ||
+			nowMs - this.lastHighlightPickAt >= 50;
+		if (mustRepick) {
+			hit = this.pickBlock();
+			this.cachedHighlightHit = hit;
+			this.lastHighlightPickAt = nowMs;
+		}
 		if (!hit) {
 			this.highlight.visible = false;
 			return null;
@@ -1175,6 +1210,19 @@ export class HexWorldGame implements DisposeBag {
 
 	private currentAxialUnderPlayer(): { q: number; r: number } {
 		return worldToAxial(this.cameraCtrl.yawObject.position.x, this.cameraCtrl.yawObject.position.z);
+	}
+
+	private updateRenderWindow(force = false): void {
+		if (this.inspect.enabled) return;
+		const ax = this.currentAxialUnderPlayer();
+		if (!force && Number.isFinite(this.renderWindowCenterQ) && Number.isFinite(this.renderWindowCenterR)) {
+			const moved = hexDist(this.renderWindowCenterQ, this.renderWindowCenterR, ax.q, ax.r);
+			if (moved < this.renderWindowRecenterDistance) return;
+		}
+		this.world.setRenderWindow(ax.q, ax.r, this.renderRadius);
+		this.renderWindowCenterQ = ax.q;
+		this.renderWindowCenterR = ax.r;
+		this.invalidateHighlightCache();
 	}
 
 	private sampleGroundFeetYAtWorld(x: number, z: number): number {
@@ -1209,10 +1257,11 @@ export class HexWorldGame implements DisposeBag {
 				this.updateWeather(nowMs, dt);
 				this.updateNpcs(dt, nowMs);
 				this.updatePortalAnimations(nowMs);
+				this.updateRenderWindow();
 			}
 		}
 
-		const hit = this.updateHighlight();
+		const hit = this.updateHighlight(nowMs);
 
 		this.frame++;
 		if (nowMs - this.lastFpsT > 400) {
@@ -1221,13 +1270,14 @@ export class HexWorldGame implements DisposeBag {
 			this.lastFpsT = nowMs;
 		}
 
-		this.updateHud(hit);
+		this.updateHud(hit, nowMs);
 		this.updatePortalHint();
 		updateNatureTextureAnimation({
-			grassTop: (this.mats.grass[1] as THREE.MeshStandardMaterial).map as THREE.Texture | null,
-			grassSide: (this.mats.grass[0] as THREE.MeshStandardMaterial).map as THREE.Texture | null,
-			sand: (this.mats.sand[0] as THREE.MeshStandardMaterial).map as THREE.Texture | null,
-			water: (this.mats.water[0] as THREE.MeshStandardMaterial).map as THREE.Texture | null
+			grassTop: (this.mats.grass[1] as THREE.MeshLambertMaterial).map as THREE.Texture | null,
+			grassSide: (this.mats.grass[0] as THREE.MeshLambertMaterial).map as THREE.Texture | null,
+			sand: (this.mats.sand[0] as THREE.MeshLambertMaterial).map as THREE.Texture | null,
+			water: (this.mats.water[0] as THREE.MeshLambertMaterial).map as THREE.Texture | null,
+			fire: (this.mats.fire[0] as THREE.MeshLambertMaterial).map as THREE.Texture | null
 		}, nowMs);
 		this.audio.step(nowMs, this.daylightFactor());
 		this.renderer.render(this.scene, this.camera);
@@ -1413,7 +1463,7 @@ export class HexWorldGame implements DisposeBag {
 		this.el.eraBanner.textContent = `${this.currentBiome.place} | ${this.currentBiome.eraLabel} | ${this.currentBiome.yearLabel}`;
 	}
 
-	private updateHud(hit: PickHit | null): void {
+	private updateHud(hit: PickHit | null, nowMs: number): void {
 		if (this.inspect.enabled) {
 			if (!this.inspect.ui) return;
 			setHudRows(this.el.hud, [
@@ -1424,6 +1474,13 @@ export class HexWorldGame implements DisposeBag {
 			return;
 		}
 		if (this.menuOpen) return;
+		if (nowMs - this.lastHudUpdateAt < this.hudUpdateIntervalMs) return;
+		this.lastHudUpdateAt = nowMs;
+
+		if (!this.hudVerbose) {
+			setHudRows(this.el.hud, [{ label: 'fps', value: String(this.fps) }]);
+			return;
+		}
 
 		const ax = this.currentAxialUnderPlayer();
 		const sel = PALETTE[this.selectedPaletteIdx];
@@ -1448,7 +1505,12 @@ export class HexWorldGame implements DisposeBag {
 			{ label: 'pick', value: hitStr },
 			{ label: 'portal', value: this.portalHint || '-' },
 			{ label: 'sound', value: this.audio.isMuted() ? 'muted (M)' : 'on (M)' },
-			{ label: 'hint', value: 'LMB remove, RMB place, E portal quiz, Space jump, F fast' }
+			{
+				label: 'hint',
+				value: this.touchUiEnabled
+					? 'tap break, two-finger tap place, portal button to travel'
+					: 'LMB remove, RMB place, E portal quiz, Space jump, F fast'
+			}
 		]);
 	}
 

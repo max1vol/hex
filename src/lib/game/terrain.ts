@@ -1,5 +1,6 @@
-import { SOLID_BLOCKS, WORLD_MIN_RADIUS } from './constants';
-import { axialRound, fbm, hash2, hexDist } from './hex';
+import { MAX_Y, SOLID_BLOCKS, WORLD_MIN_RADIUS } from './constants';
+import { axialRound, axialToWorld, fbm, hash2, hexDist, worldToAxial } from './hex';
+import { STONEHENGE_PLAN, STONEHENGE_PLAN_META } from './stonehengePlan.generated';
 import type {
 	BiomeManifest,
 	BlockPlacement,
@@ -18,6 +19,17 @@ const ANCHOR_VECTORS: Record<PortalLink['anchor'], AxialCoord> = {
 	southWest: { q: -1, r: 1 }
 };
 
+const STONEHENGE_PLAN_SCALE = 1.35;
+
+const AXIAL_DIRECTIONS: AxialCoord[] = [
+	{ q: 1, r: 0 },
+	{ q: 1, r: -1 },
+	{ q: 0, r: -1 },
+	{ q: -1, r: 0 },
+	{ q: -1, r: 1 },
+	{ q: 0, r: 1 }
+];
+
 function key(q: number, r: number, y: number): string {
 	return `${q},${r},${y}`;
 }
@@ -28,6 +40,7 @@ function columnKey(q: number, r: number): string {
 
 interface BuildCtx {
 	setBlock: (q: number, r: number, y: number, type: BlockType) => void;
+	removeBlock: (q: number, r: number, y: number) => void;
 	getTopSolidY: (q: number, r: number) => number;
 	getTopAnyY: (q: number, r: number) => number;
 	manifest: BiomeManifest;
@@ -117,6 +130,27 @@ function upliftColumnTo(
 	ctx.setBlock(q, r, targetTopY, surface);
 }
 
+function trimColumnToTop(ctx: BuildCtx, q: number, r: number, targetTopY: number): void {
+	const cappedTop = Math.max(1, targetTopY);
+	for (let y = ctx.getTopAnyY(q, r); y > cappedTop; y--) {
+		ctx.removeBlock(q, r, y);
+	}
+}
+
+function setColumnTop(
+	ctx: BuildCtx,
+	q: number,
+	r: number,
+	targetTopY: number,
+	subsurface: BlockType,
+	surface: BlockType
+): void {
+	const cappedTop = Math.max(1, targetTopY);
+	trimColumnToTop(ctx, q, r, cappedTop);
+	upliftColumnTo(ctx, q, r, cappedTop, subsurface, surface);
+	ctx.setBlock(q, r, cappedTop, surface);
+}
+
 function circularCells(radius: number): Array<{ q: number; r: number }> {
 	const cells: Array<{ q: number; r: number }> = [];
 	for (let q = -radius; q <= radius; q++) {
@@ -143,126 +177,228 @@ function ringCells(radius: number, count: number, phase = 0): Array<{ q: number;
 	return out;
 }
 
-function addStonehengeLandmarks(ctx: BuildCtx): void {
-	const plazaY = Math.max(4, ctx.getTopSolidY(0, 0));
+function cellSet(cells: ReadonlyArray<{ q: number; r: number }>): Set<string> {
+	const set = new Set<string>();
+	for (const c of cells) set.add(`${c.q},${c.r}`);
+	return set;
+}
 
-	// Normalize the ceremonial bowl area so megaliths are grounded and not floating.
-	for (const cell of circularCells(22)) {
+function isInCellSet(cells: Set<string>, q: number, r: number): boolean {
+	return cells.has(`${q},${r}`);
+}
+
+function scalePlanCells(cells: ReadonlyArray<AxialCoord>, scale: number): AxialCoord[] {
+	const out: AxialCoord[] = [];
+	const seen = new Set<string>();
+	for (const c of cells) {
+		const w = axialToWorld(c.q, c.r);
+		const a = worldToAxial(w.x * scale, w.z * scale);
+		const k = `${a.q},${a.r}`;
+		if (seen.has(k)) continue;
+		seen.add(k);
+		out.push(a);
+	}
+	return out;
+}
+
+function addStonehengeLandmarks(ctx: BuildCtx): void {
+	const scaledPathCells = scalePlanCells(STONEHENGE_PLAN.pathCells, STONEHENGE_PLAN_SCALE);
+	const scaledWaterCells = scalePlanCells(STONEHENGE_PLAN.waterCells, STONEHENGE_PLAN_SCALE);
+	const scaledHutCenters = scalePlanCells(STONEHENGE_PLAN.hutCenters, STONEHENGE_PLAN_SCALE);
+	const scaledHearthCenters = scalePlanCells(STONEHENGE_PLAN.hearthCenters, STONEHENGE_PLAN_SCALE);
+	const scaledStoneMaskCells = scalePlanCells(STONEHENGE_PLAN.stoneMaskCells, STONEHENGE_PLAN_SCALE * 1.08);
+
+	const plazaY = Math.max(6, ctx.getTopSolidY(0, 0));
+	const featureRadius = Math.max(28, Math.round(STONEHENGE_PLAN_META.worldFeatureRadius * STONEHENGE_PLAN_SCALE));
+	const flattenRadius = featureRadius + 4;
+	const waterLevel = plazaY - 1;
+
+	const pathMask = cellSet(scaledPathCells);
+	const waterMask = cellSet(scaledWaterCells);
+	const hutCenterMask = cellSet(scaledHutCenters);
+
+	// Terrain first: flatten the ceremonial plain, carve ditch/bank rings, and apply map water.
+	for (const cell of circularCells(flattenRadius)) {
 		const d = hexDist(0, 0, cell.q, cell.r);
 		let target = plazaY;
-		if (d > 15.4 && d < 16.9) target = plazaY - 1; // ditch ring
-		if (d > 18.2 && d < 20.3) target = plazaY + 1; // bank ring
-		upliftColumnTo(ctx, cell.q, cell.r, target, 'dirt', d < 20 ? 'grass' : 'dirt');
+		if (d > 14.7 && d < 16.8) target -= 2; // ditch ring
+		if (d > 17.8 && d < 19.8) target += 1; // bank ring
+		if (d > 22) target += Math.min(3, Math.floor((d - 22) / 5)); // gentle rise outside ritual core
+		if (isInCellSet(pathMask, cell.q, cell.r)) target = Math.min(target, plazaY);
+
+		if (isInCellSet(waterMask, cell.q, cell.r)) {
+			target = Math.min(target, waterLevel - 2);
+			setColumnTop(ctx, cell.q, cell.r, target, 'dirt', 'sand');
+			for (let y = target + 1; y <= waterLevel; y++) {
+				ctx.setBlock(cell.q, cell.r, y, 'water');
+			}
+			continue;
+		}
+
+		const surface: BlockType = d > 20 && d < 24 ? 'dirt' : 'grass';
+		setColumnTop(ctx, cell.q, cell.r, target, 'dirt', surface);
 	}
 
-	const groundSnapshot = new Map<string, number>();
-	for (let q = -40; q <= 40; q++) {
-		for (let r = -40; r <= 40; r++) {
-			if (hexDist(0, 0, q, r) > 44) continue;
-			groundSnapshot.set(`${q},${r}`, ctx.getTopSolidY(q, r));
+	// Widen path mask to produce readable processional routes in top-down debug output.
+	const widenedPathCells: Array<{ q: number; r: number }> = [];
+	const widenedSet = new Set<string>();
+	for (const p of scaledPathCells) {
+		const toAdd = [p, ...AXIAL_DIRECTIONS.map((d) => ({ q: p.q + d.q, r: p.r + d.r }))];
+		for (const c of toAdd) {
+			if (hexDist(0, 0, c.q, c.r) > flattenRadius) continue;
+			const k = `${c.q},${c.r}`;
+			if (widenedSet.has(k)) continue;
+			widenedSet.add(k);
+			widenedPathCells.push(c);
 		}
 	}
-	const groundAt = (q: number, r: number): number =>
-		groundSnapshot.get(`${q},${r}`) ?? ctx.getTopSolidY(q, r);
-
-	// Main sarsen ring with a clear entrance gap toward the avenue (north-east).
-	const sarsenCells = ringCells(11, 34, Math.PI / 22).filter((c) => {
-		const inGap = c.q > 4 && c.r < -4 && Math.abs(c.q + c.r) <= 3;
-		return !inGap;
-	});
-	const sarsenTops: Array<{ q: number; r: number; top: number }> = [];
-	for (let i = 0; i < sarsenCells.length; i++) {
-		const c = sarsenCells[i];
-		const baseY = groundAt(c.q, c.r) + 1;
-		const height = i % 5 === 0 ? 7 : 6;
-		fillHexColumn(ctx, c.q, c.r, 0, baseY, baseY + height, 'stone');
-		sarsenTops.push({ q: c.q, r: c.r, top: baseY + height });
+	for (const p of widenedPathCells) {
+		if (isInCellSet(waterMask, p.q, p.r)) continue;
+		const y = ctx.getTopSolidY(p.q, p.r);
+		setColumnTop(ctx, p.q, p.r, y, 'dirt', 'sand');
 	}
-	for (let i = 0; i < sarsenTops.length; i++) {
-		const a = sarsenTops[i];
-		const b = sarsenTops[(i + 1) % sarsenTops.length];
-		if (hexDist(a.q, a.r, b.q, b.r) > 3) continue; // don't bridge the entrance gap
+
+	// Sand banks around water channels.
+	for (const water of scaledWaterCells) {
+		for (const dir of AXIAL_DIRECTIONS) {
+			const q = water.q + dir.q;
+			const r = water.r + dir.r;
+			if (isInCellSet(waterMask, q, r)) continue;
+			if (hexDist(0, 0, q, r) > flattenRadius) continue;
+			const y = ctx.getTopSolidY(q, r);
+			ctx.setBlock(q, r, y, 'sand');
+		}
+	}
+
+	const stoneTopByColumn = new Map<string, number>();
+	const setStoneTop = (q: number, r: number, top: number): void => {
+		stoneTopByColumn.set(`${q},${r}`, top);
+	};
+	const getStoneTop = (q: number, r: number): number => stoneTopByColumn.get(`${q},${r}`) ?? -1;
+
+	const placeStoneColumn = (q: number, r: number, h: number, radius = 0): void => {
+		const baseY = ctx.getTopSolidY(q, r) + 1;
+		fillHexColumn(ctx, q, r, radius, baseY, baseY + h, 'stone');
+		setStoneTop(q, r, baseY + h);
+	};
+
+	// Main sarsen ring with an opening aligned to the avenue.
+	const outerRing = ringCells(11, 30, Math.PI / 28).filter((c) => !(c.r < -8 && Math.abs(c.q) <= 3));
+	const outerRingTops: Array<{ q: number; r: number; top: number; angle: number }> = [];
+	for (let i = 0; i < outerRing.length; i++) {
+		const c = outerRing[i];
+		const h = i % 5 === 0 ? 7 : 6;
+		placeStoneColumn(c.q, c.r, h, 0);
+		const w = axialToWorld(c.q, c.r);
+		outerRingTops.push({ q: c.q, r: c.r, top: getStoneTop(c.q, c.r), angle: Math.atan2(w.z, w.x) });
+	}
+	outerRingTops.sort((a, b) => a.angle - b.angle);
+	for (let i = 0; i < outerRingTops.length; i++) {
+		const a = outerRingTops[i];
+		const b = outerRingTops[(i + 1) % outerRingTops.length];
+		if (hexDist(a.q, a.r, b.q, b.r) > 3) continue;
 		const lintelY = Math.min(a.top, b.top);
-		for (const cell of axialLineCells(a.q, a.r, b.q, b.r)) {
-			ctx.setBlock(cell.q, cell.r, lintelY, 'stone');
+		for (const c of axialLineCells(a.q, a.r, b.q, b.r)) {
+			ctx.setBlock(c.q, c.r, lintelY, 'stone');
 		}
 	}
 
-	// Inner bluestone ring.
-	for (const c of ringCells(6, 22, Math.PI / 16)) {
-		const baseY = groundAt(c.q, c.r) + 1;
-		const h = (Math.abs(c.q) + Math.abs(c.r)) % 2 === 0 ? 4 : 3;
-		fillHexColumn(ctx, c.q, c.r, 0, baseY, baseY + h, 'stone');
+	// Inner bluestone ring and selected fallen stones from the extracted mask.
+	const innerRing = ringCells(7, 18, Math.PI / 18);
+	for (let i = 0; i < innerRing.length; i++) {
+		const c = innerRing[i];
+		const h = i % 2 === 0 ? 4 : 5;
+		placeStoneColumn(c.q, c.r, h, 0);
+	}
+	for (const stone of scaledStoneMaskCells) {
+		const d = hexDist(0, 0, stone.q, stone.r);
+		if (d < 5 || d > 13) continue;
+		if (hexDist(0, 0, stone.q, stone.r) > 10 && isInCellSet(pathMask, stone.q, stone.r)) continue;
+		const lowY = ctx.getTopSolidY(stone.q, stone.r) + 1;
+		ctx.setBlock(stone.q, stone.r, lowY, 'stone');
 	}
 
-	// Inner horseshoe of trilithons (larger paired stones with lintels).
-	const trilithons = [
-		{ left: { q: -1, r: 4 }, right: { q: 1, r: 4 }, h: 8 },
-		{ left: { q: -3, r: 2 }, right: { q: -1, r: 2 }, h: 7 },
-		{ left: { q: -4, r: -1 }, right: { q: -2, r: -1 }, h: 7 },
-		{ left: { q: -3, r: -4 }, right: { q: -1, r: -4 }, h: 6 },
-		{ left: { q: 0, r: -6 }, right: { q: 2, r: -6 }, h: 6 }
-	];
-	for (const tri of trilithons) {
-		const leftBase = groundAt(tri.left.q, tri.left.r) + 1;
-		const rightBase = groundAt(tri.right.q, tri.right.r) + 1;
-		fillHexColumn(ctx, tri.left.q, tri.left.r, 0, leftBase, leftBase + tri.h, 'stone');
-		fillHexColumn(ctx, tri.right.q, tri.right.r, 0, rightBase, rightBase + tri.h, 'stone');
-		const lintelY = Math.min(leftBase + tri.h, rightBase + tri.h);
-		for (const cell of axialLineCells(tri.left.q, tri.left.r, tri.right.q, tri.right.r)) {
-			ctx.setBlock(cell.q, cell.r, lintelY, 'stone');
+	const placeTrilithon = (left: AxialCoord, right: AxialCoord, h: number): void => {
+		const leftBase = ctx.getTopSolidY(left.q, left.r) + 1;
+		const rightBase = ctx.getTopSolidY(right.q, right.r) + 1;
+		fillHexColumn(ctx, left.q, left.r, 0, leftBase, leftBase + h, 'stone');
+		fillHexColumn(ctx, right.q, right.r, 0, rightBase, rightBase + h, 'stone');
+		const lintelY = Math.min(leftBase + h, rightBase + h);
+		const line = axialLineCells(left.q, left.r, right.q, right.r);
+		for (let i = 0; i < line.length; i++) {
+			const c = line[i];
+			if (i === 0 || i === line.length - 1) continue;
+			ctx.setBlock(c.q, c.r, lintelY, 'stone');
 		}
-	}
+	};
+
+	// Central pi-shaped trilithons and inner horseshoe.
+	placeTrilithon({ q: -2, r: -1 }, { q: 2, r: -1 }, 8);
+	placeTrilithon({ q: -3, r: 4 }, { q: 1, r: 4 }, 8);
+	placeTrilithon({ q: -5, r: 2 }, { q: -2, r: 2 }, 7);
+	placeTrilithon({ q: -6, r: -1 }, { q: -3, r: -1 }, 7);
+	placeTrilithon({ q: -5, r: -4 }, { q: -2, r: -4 }, 6);
+	placeTrilithon({ q: -2, r: -6 }, { q: 1, r: -6 }, 6);
+
+	const altarY = ctx.getTopSolidY(0, 0) + 1;
+	fillHexDisc(ctx, 0, 0, 0, altarY, 'stone');
+
+	const resolveGround = (q: number, r: number): number => ctx.getTopSolidY(q, r);
 
 	// Processional avenue and heel stone.
-	paintTrail(ctx, 6, -6, 28, -28, 1, 'sand', groundAt);
-	paintTrail(ctx, 8, -7, 30, -29, 1, 'sand', groundAt);
-	const heelBase = groundAt(32, -32) + 1;
-	fillHexColumn(ctx, 32, -32, 1, heelBase, heelBase + 8, 'stone');
+	paintTrail(ctx, 0, -8, 0, -30, 1, 'sand', resolveGround);
+	paintTrail(ctx, 1, -8, 1, -30, 1, 'sand', resolveGround);
+	const heelBase = ctx.getTopSolidY(1, -32) + 1;
+	fillHexColumn(ctx, 1, -32, 1, heelBase, heelBase + 8, 'stone');
 
-	// Roundhouse villages surrounding the henge.
-	const villageCenters = [
-		{ q: -24, r: 10 },
-		{ q: -20, r: 18 },
-		{ q: -10, r: 20 },
-		{ q: 18, r: 14 },
-		{ q: 26, r: 20 },
-		{ q: 12, r: -18 }
-	];
-	for (let i = 0; i < villageCenters.length; i++) {
-		const v = villageCenters[i];
-		const floorY = groundAt(v.q, v.r);
-		fillHexDisc(ctx, v.q, v.r, 2, floorY, 'dirt');
-		for (let q = v.q - 3; q <= v.q + 3; q++) {
-			for (let r = v.r - 3; r <= v.r + 3; r++) {
-				const d = hexDist(v.q, v.r, q, r);
+	// Roundhouse villages from extracted hut centers.
+	for (let i = 0; i < scaledHutCenters.length; i++) {
+		const hut = scaledHutCenters[i];
+		const floorY = ctx.getTopSolidY(hut.q, hut.r);
+		fillHexDisc(ctx, hut.q, hut.r, 2, floorY, 'dirt');
+
+		const doorQ = hut.q + Math.sign(-hut.q || 1);
+		const doorR = hut.r + Math.sign(-hut.r || -1);
+		for (let q = hut.q - 3; q <= hut.q + 3; q++) {
+			for (let r = hut.r - 3; r <= hut.r + 3; r++) {
+				const d = hexDist(hut.q, hut.r, q, r);
 				if (d < 2 || d > 3) continue;
-				fillHexColumn(ctx, q, r, 0, floorY + 1, floorY + 2, 'stone');
+				if (hexDist(doorQ, doorR, q, r) <= 1) continue;
+				fillHexColumn(ctx, q, r, 0, floorY + 1, floorY + 2, 'timber');
 			}
 		}
+
 		const roofBase = floorY + 3;
-		fillHexDisc(ctx, v.q, v.r, 2, roofBase, 'sand');
-		fillHexDisc(ctx, v.q, v.r, 1, roofBase + 1, 'sand');
-		fillHexDisc(ctx, v.q, v.r, 0, roofBase + 2, 'sand');
+		fillHexDisc(ctx, hut.q, hut.r, 2, roofBase, 'thatch');
+		fillHexDisc(ctx, hut.q, hut.r, 1, roofBase + 1, 'thatch');
+		fillHexDisc(ctx, hut.q, hut.r, 0, roofBase + 2, 'thatch');
 
-		const penQ = v.q + (i % 2 === 0 ? 4 : -4);
-		const penR = v.r + (i % 2 === 0 ? -2 : 2);
-		const penY = groundAt(penQ, penR);
-		fillHexDisc(ctx, penQ, penR, 2, penY, 'grass');
-		for (let q = penQ - 3; q <= penQ + 3; q++) {
-			for (let r = penR - 3; r <= penR + 3; r++) {
-				const d = hexDist(penQ, penR, q, r);
-				if (d < 2 || d > 3) continue;
-				ctx.setBlock(q, r, penY + 1, 'stone');
-			}
+		if (i % 3 === 0) {
+			ctx.setBlock(hut.q, hut.r, floorY + 1, 'fire');
 		}
 
-		paintTrail(ctx, v.q, v.r, 0, 0, 1, 'sand', groundAt);
+		paintTrail(ctx, hut.q, hut.r, 0, 0, 0, 'sand', resolveGround);
 	}
 
-	// Internal ceremonial paths.
-	paintTrail(ctx, -9, 0, 9, 0, 1, 'sand', groundAt);
-	paintTrail(ctx, 0, -9, 0, 9, 1, 'sand', groundAt);
+	// Hearth clusters with animated fire blocks.
+	for (const hearthCell of scaledHearthCenters) {
+		let q = hearthCell.q;
+		let r = hearthCell.r;
+		if (isInCellSet(hutCenterMask, q, r)) {
+			q += 1;
+			r -= 1;
+		}
+		const y = ctx.getTopSolidY(q, r) + 1;
+		for (const dir of AXIAL_DIRECTIONS) {
+			ctx.setBlock(q + dir.q, r + dir.r, y, 'stone');
+		}
+		ctx.setBlock(q, r, y, 'stone');
+		ctx.setBlock(q, r, y + 1, 'fire');
+	}
+
+	// Cross-paths through the ceremonial rings.
+	paintTrail(ctx, -9, 0, 9, 0, 1, 'sand', resolveGround);
+	paintTrail(ctx, 0, -9, 0, 9, 1, 'sand', resolveGround);
 }
 
 function addEgyptLandmarks(ctx: BuildCtx): void {
@@ -443,6 +579,31 @@ export function generateBiomeTerrain(manifest: BiomeManifest, seed: number): Gen
 		}
 	};
 
+	const recomputeColumnTops = (q: number, r: number): void => {
+		const ck = columnKey(q, r);
+		let topAny = -1;
+		let topSolid = -1;
+		for (let y = MAX_Y; y >= 0; y--) {
+			const t = blockMap.get(key(q, r, y));
+			if (!t) continue;
+			if (topAny === -1) topAny = y;
+			if (topSolid === -1 && SOLID_BLOCKS.has(t)) topSolid = y;
+			if (topAny !== -1 && topSolid !== -1) break;
+		}
+		if (topAny >= 0) topAnyByColumn.set(ck, topAny);
+		else topAnyByColumn.delete(ck);
+		if (topSolid >= 0) topSolidByColumn.set(ck, topSolid);
+		else topSolidByColumn.delete(ck);
+	};
+
+	const removeBlock = (q: number, r: number, y: number): void => {
+		if (y <= 0) return; // preserve bedrock floor
+		const k = key(q, r, y);
+		if (!blockMap.has(k)) return;
+		blockMap.delete(k);
+		recomputeColumnTops(q, r);
+	};
+
 	const getTopSolidY = (q: number, r: number): number => topSolidByColumn.get(columnKey(q, r)) ?? 0;
 	const getTopAnyY = (q: number, r: number): number => topAnyByColumn.get(columnKey(q, r)) ?? 0;
 
@@ -511,6 +672,7 @@ export function generateBiomeTerrain(manifest: BiomeManifest, seed: number): Gen
 
 	const ctx: BuildCtx = {
 		setBlock,
+		removeBlock,
 		getTopSolidY,
 		getTopAnyY,
 		manifest
@@ -518,20 +680,18 @@ export function generateBiomeTerrain(manifest: BiomeManifest, seed: number): Gen
 	applyLandmarks(ctx);
 
 	if (manifest.id === 'grassland-origins') {
-		// Keep Stonehenge world lively with clustered settlements and grazing areas.
-		const extraSpawns = [
-			{ q: -18, r: 12 },
-			{ q: -16, r: 15 },
-			{ q: -14, r: 18 },
-			{ q: -11, r: 13 },
-			{ q: -9, r: 10 },
-			{ q: 16, r: 11 },
-			{ q: 20, r: 15 },
-			{ q: 22, r: 17 },
-			{ q: 11, r: 8 },
-			{ q: 6, r: -8 },
-			{ q: -6, r: -9 }
-		];
+		// Keep Stonehenge world lively around villages, hearths, and the ritual core.
+		const scaledHutCenters = scalePlanCells(STONEHENGE_PLAN.hutCenters, STONEHENGE_PLAN_SCALE);
+		const scaledHearthCenters = scalePlanCells(STONEHENGE_PLAN.hearthCenters, STONEHENGE_PLAN_SCALE);
+		const extraSpawns: AxialCoord[] = [];
+		for (const hut of scaledHutCenters) {
+			extraSpawns.push({ q: hut.q, r: hut.r });
+			extraSpawns.push({ q: hut.q + 1, r: hut.r });
+		}
+		for (const hearth of scaledHearthCenters) {
+			extraSpawns.push({ q: hearth.q - 1, r: hearth.r + 1 });
+		}
+		extraSpawns.push({ q: 0, r: 0 }, { q: -2, r: 3 }, { q: 2, r: -3 }, { q: 1, r: -12 }, { q: 4, r: -18 });
 		for (const s of extraSpawns) npcSpawns.push(s);
 	}
 

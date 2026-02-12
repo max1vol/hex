@@ -12,7 +12,10 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test:unit": "vitest run",
 		"test:e2e": "playwright test",
-		"test": "npm run test:unit"
+		"test": "npm run test:unit",
+		"stonehenge:extract-plan": "tsx scripts/stonehenge/extract-plan-from-mask.ts",
+		"stonehenge:render": "tsx scripts/stonehenge/render-map.ts",
+		"stonehenge:render:fast": "npx esbuild scripts/stonehenge/render-map.ts --bundle --platform=node --format=esm --outfile=.tmp/stonehenge-render.mjs && node .tmp/stonehenge-render.mjs"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.58.2",
@@ -21,8 +24,10 @@
 		"@sveltejs/vite-plugin-svelte": "^6.2.4",
 		"@types/node": "^25.2.3",
 		"@types/three": "^0.182.0",
+		"pngjs": "^7.0.0",
 		"svelte": "^5.49.2",
 		"svelte-check": "^4.3.6",
+		"tsx": "^4.21.0",
 		"typescript": "^5.9.3",
 		"vite": "^7.3.1",
 		"vitest": "^4.0.18"
