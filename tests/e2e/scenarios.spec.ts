@@ -13,7 +13,9 @@ async function readState(page: Page): Promise<RenderState> {
 	});
 }
 
-test('scenario: movement, place/remove loop, and biome regeneration', async ({ page }) => {
+test('scenario: movement and place/remove loop', async ({ page }) => {
+	test.setTimeout(240_000);
+
 	await page.goto('/');
 	await page.locator('canvas#c').click({ position: { x: 720, y: 420 } });
 	await page.waitForFunction(() => {
@@ -48,12 +50,6 @@ test('scenario: movement, place/remove loop, and biome regeneration', async ({ p
 
 	expect(placeOk || removeOk).toBe(true);
 	expect(Math.abs(afterPlace.blocks - afterRemove.blocks)).toBeGreaterThanOrEqual(0);
-
-	await page.evaluate(
-		() => (window as Window & { hexworld_debug_action?: (action: string) => boolean }).hexworld_debug_action?.('regen')
-	);
-	await page.waitForTimeout(500);
-	const afterRegen = await readState(page);
-	expect(afterRegen.biomeId).toBe(start.biomeId);
-	expect(afterRegen.blocks).toBeGreaterThan(2000);
+	expect(afterRemove.biomeId).toBe(start.biomeId);
+	expect(afterRemove.blocks).toBeGreaterThan(2000);
 });

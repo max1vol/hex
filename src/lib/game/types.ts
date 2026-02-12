@@ -197,6 +197,8 @@ export interface PortalInstance {
 export interface NpcInstance {
 	id: string;
 	group: THREE.Group;
+	kind: 'villager' | 'animal';
+	species?: 'aurochs' | 'deer' | 'sheep' | 'boar';
 	q: number;
 	r: number;
 	homeQ: number;

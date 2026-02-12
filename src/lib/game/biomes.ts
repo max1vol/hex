@@ -13,14 +13,14 @@ function q(
 export const BIOMES: BiomeManifest[] = [
 	{
 		id: 'grassland-origins',
-		place: 'Grassland Origins',
-		eraLabel: 'Foundations Of Civilizations',
-		yearLabel: 'c. 10,000 BCE - Present',
-		description: 'A broad starter biome with rivers, hills, and the first portal circles.',
-		radius: 38,
-		seaLevel: 7,
-		heightBoost: 7,
-		noiseScale: 0.95,
+		place: 'Stonehenge Ritual Plain',
+		eraLabel: 'Late Neolithic Britain',
+		yearLabel: 'c. 2500 BCE',
+		description: 'A vast active Stonehenge landscape with processional avenues, hearth villages, and pasture.',
+		radius: 64,
+		seaLevel: 6,
+		heightBoost: 9,
+		noiseScale: 0.88,
 		palette: ['grass', 'dirt', 'stone', 'sand', 'water', 'bedrock'],
 		blockSet: {
 			surface: 'grass',
@@ -31,17 +31,17 @@ export const BIOMES: BiomeManifest[] = [
 			bedrock: 'bedrock'
 		},
 		ambience: {
-			skyDayTop: 0x85b8ff,
-			skyDayBottom: 0xbdd8ff,
-			skyNightTop: 0x0b1432,
-			skyNightBottom: 0x11214a,
-			fogColor: 0x9ab8da,
-			fogDensity: 0.018,
-			sunColor: 0xfff5d6,
-			weatherPool: ['clear', 'rain', 'mist'],
-			musicRoot: 220,
-			musicAccent: 330,
-			tempoBpm: 86
+			skyDayTop: 0x9ab9dc,
+			skyDayBottom: 0xd6e8f4,
+			skyNightTop: 0x101b34,
+			skyNightBottom: 0x1f3454,
+			fogColor: 0xb3c6cf,
+			fogDensity: 0.016,
+			sunColor: 0xffefcb,
+			weatherPool: ['clear', 'mist', 'rain'],
+			musicRoot: 196,
+			musicAccent: 294,
+			tempoBpm: 82
 		},
 		portalRequirement: { mode: 'quiz', minCorrect: 1 },
 		portalLinks: [
@@ -50,37 +50,37 @@ export const BIOMES: BiomeManifest[] = [
 			{ toBiome: 'san-francisco-bay', label: 'San Francisco Portal', anchor: 'west', requirement: 'quiz' }
 		],
 		learningGoals: [
-			'Identify how rivers and fertile land help people settle.',
-			'Recognize how pathways connect different places.',
-			'Observe how weather affects visibility and travel.'
+			'Identify Stonehenge as a Neolithic ceremonial site built from megalith stones.',
+			'Recognize that people gathered seasonally for rituals, feasts, and trade.',
+			'Connect henge monuments, avenue routes, and nearby settlements in one landscape.'
 		],
 		interactiveTasks: [
-			'Build a small bridge over a stream.',
-			'Repair one portal ring by placing missing blocks.',
-			'Collect clues on signposts for your first quiz.'
+			'Rebuild missing lintel stones on the outer ring.',
+			'Follow the processional avenue from heel stone to the central circle.',
+			'Repair roundhouse hearth walls in the nearby settlement.'
 		],
-		landmarkKits: ['Stone circles', 'River delta', 'Portal arches'],
+		landmarkKits: ['Stonehenge ring', 'Heel stone avenue', 'Roundhouse village'],
 		quizzes: [
 			q(
-				'go-river',
-				'What feature in this biome is best for travel and water supply?',
-				['A river', 'A cliff wall', 'A lava pit'],
+				'sh-megalith',
+				'What are the huge upright stones in this biome called?',
+				['Megaliths', 'Skyscrapers', 'Satellites'],
 				0,
-				'Rivers provide fresh water and often act as travel routes.'
+				'Megalith means a very large stone used in ancient monuments.'
 			),
 			q(
-				'go-portal',
-				'What shape marks teleport spots in Grassland Origins?',
-				['A glowing ring', 'A giant cube', 'A single torch'],
+				'sh-era',
+				'Stonehenge Ritual Plain represents which era?',
+				['Late Neolithic Britain', 'Industrial Revolution', 'Roman Empire'],
 				0,
-				'The glowing ring structures are the teleport portals.'
+				'Stonehenge belongs to late Neolithic and early Bronze Age Britain.'
 			),
 			q(
-				'go-weather',
-				'When mist arrives, what usually gets harder?',
-				['Seeing far away', 'Jumping', 'Collecting blocks'],
+				'sh-avenue',
+				'What path leads toward the stone circle in this biome?',
+				['A processional avenue', 'A railway line', 'A motorway'],
 				0,
-				'Mist lowers long-distance visibility.'
+				'The processional avenue guided movement to ceremonial spaces.'
 			)
 		]
 	},

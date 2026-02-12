@@ -10,9 +10,10 @@ type SurfaceTone = 'stone' | 'sand' | 'metal' | 'glass' | 'earth';
 const TRACK_FOREST: BgmTrack = { url: '/audio/forest_ambience.mp3', volume: 0.48 };
 const TRACK_DESERT: BgmTrack = { url: '/audio/desert_travel.ogg', volume: 0.42 };
 const TRACK_SPACE: BgmTrack = { url: '/audio/outer_space.mp3', volume: 0.38 };
+const TRACK_STONEHENGE: BgmTrack = { url: '/audio/stonehenge_drums.wav', volume: 0.5 };
 
 const TRACK_BY_BIOME: Record<string, BgmTrack> = {
-	'grassland-origins': TRACK_FOREST,
+	'grassland-origins': TRACK_STONEHENGE,
 	'ancient-egypt': TRACK_DESERT,
 	'ice-age': TRACK_SPACE,
 	'ancient-rome': TRACK_DESERT,

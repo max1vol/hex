@@ -17,3 +17,7 @@ All audio files are sourced from OpenGameArt.
 - "Portal Sound" by baefl (CC0)
   Source: https://opengameart.org/content/portal-sound
   File: portal.ogg (from PortalSFX/porta.ogg)
+
+- "Prehistoric Drum Loop" by drummyfish (CC0)
+  Source: https://opengameart.org/content/prehistoric-drum-loop
+  File: stonehenge_drums.wav (from select.wav)

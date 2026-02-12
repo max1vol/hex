@@ -4,6 +4,16 @@
 
 All previously listed near-term engineering and design tasks are implemented in this branch.
 
+## Latest update (2026-02-11, mobile + Stonehenge pass)
+
+- [x] Replaced startup controls dialog with direct gameplay entry.
+- [x] Added touchscreen joystick-left + jump-right + swipe-look camera controls.
+- [x] Added touch gestures: one-finger tap breaks highlighted block, two-finger tap places selected block.
+- [x] Made material hotbar slots tappable and wrapped for narrow screens.
+- [x] Converted first biome into a much larger Stonehenge world with era-appropriate structures, villagers, and animals.
+- [x] Regenerated Stonehenge-facing terrain textures (grass/soil/stone/sand/water) using Nano Banana workflow.
+- [x] Added Stonehenge biome music track and attribution.
+
 ## Current state
 
 - [x] Core sandbox rebuilt into a modular multi-biome game loop.

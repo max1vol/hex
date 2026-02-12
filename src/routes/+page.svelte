@@ -207,13 +207,16 @@
 		bottom: 14px;
 		transform: translateX(-50%);
 		display: none;
+		flex-wrap: wrap;
+		justify-content: center;
 		gap: 10px;
 		padding: 10px 12px;
+		max-width: min(94vw, 560px);
 		border-radius: 14px;
 		border: 1px solid rgba(255, 255, 255, 0.12);
 		background: rgba(10, 14, 24, 0.5);
 		user-select: none;
-		pointer-events: none;
+		pointer-events: auto;
 		z-index: 6;
 	}
 
@@ -227,6 +230,8 @@
 		place-items: center;
 		position: relative;
 		overflow: hidden;
+		cursor: pointer;
+		touch-action: none;
 	}
 
 	#hotbar :global(.slot .num) {
@@ -459,6 +464,26 @@
 		#hud {
 			min-width: 260px;
 			max-width: 92vw;
+		}
+		#hotbar {
+			bottom: calc(126px + env(safe-area-inset-bottom));
+			max-width: min(92vw, 460px);
+			gap: 8px;
+			padding: 8px 10px;
+		}
+	}
+
+	@media (max-width: 520px) {
+		#hotbar :global(.slot) {
+			width: 40px;
+			height: 36px;
+		}
+		#hotbar :global(.slot .swatch) {
+			width: 19px;
+			height: 19px;
+		}
+		#hotbar {
+			gap: 6px;
 		}
 	}
 </style>

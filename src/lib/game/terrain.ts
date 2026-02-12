@@ -63,16 +63,74 @@ function fillHexColumn(
 	}
 }
 
-function addGrasslandLandmarks(ctx: BuildCtx): void {
-	const yBase = Math.max(2, ctx.getTopSolidY(0, 0));
-	for (let i = 0; i < 6; i++) {
-		const angle = (i / 6) * Math.PI * 2;
-		const q = Math.round(Math.cos(angle) * 6);
-		const r = Math.round(Math.sin(angle) * 6);
-		const y = Math.max(yBase, ctx.getTopSolidY(q, r));
-		fillHexColumn(ctx, q, r, 0, y + 1, y + 4, 'stone');
+function addStonehengeLandmarks(ctx: BuildCtx): void {
+	const centerY = Math.max(2, ctx.getTopSolidY(0, 0));
+
+	// Main megalith ring with lintels.
+	const outerCount = 30;
+	const outerRadius = 12;
+	for (let i = 0; i < outerCount; i++) {
+		const a = (i / outerCount) * Math.PI * 2;
+		const q = Math.round(Math.cos(a) * outerRadius);
+		const r = Math.round(Math.sin(a) * outerRadius);
+		const y = Math.max(centerY + 1, ctx.getTopSolidY(q, r) + 1);
+		fillHexColumn(ctx, q, r, 0, y, y + 6, 'stone');
+		fillHexDisc(ctx, q, r, 0, y + 7, 'stone');
 	}
-	fillHexDisc(ctx, 0, 0, 1, yBase + 1, 'stone');
+
+	// Inner horseshoe trilithons.
+	const trilithons = [
+		{ q: 0, r: -4, h: 8 },
+		{ q: -3, r: -1, h: 7 },
+		{ q: 3, r: -1, h: 7 },
+		{ q: -4, r: 3, h: 6 },
+		{ q: 4, r: 3, h: 6 }
+	];
+	for (const t of trilithons) {
+		const baseY = Math.max(centerY + 1, ctx.getTopSolidY(t.q, t.r) + 1);
+		fillHexColumn(ctx, t.q, t.r, 0, baseY, baseY + t.h, 'stone');
+		fillHexDisc(ctx, t.q, t.r, 0, baseY + t.h + 1, 'stone');
+	}
+
+	// Heel stone + processional avenue.
+	const heelQ = 0;
+	const heelR = -20;
+	const heelY = Math.max(centerY + 1, ctx.getTopSolidY(heelQ, heelR) + 1);
+	fillHexColumn(ctx, heelQ, heelR, 1, heelY, heelY + 8, 'stone');
+	for (let step = -20; step <= -6; step++) {
+		fillHexDisc(ctx, 0, step, 1, centerY + 1, 'sand');
+		fillHexDisc(ctx, 2, step, 1, centerY + 1, 'sand');
+	}
+
+	// Village roundhouses and animal pens in active-use surroundings.
+	const villageCenters = [
+		{ q: -18, r: 12 },
+		{ q: -14, r: 18 },
+		{ q: -9, r: 10 },
+		{ q: 16, r: 11 },
+		{ q: 21, r: 16 }
+	];
+	for (const v of villageCenters) {
+		const y = Math.max(centerY + 1, ctx.getTopSolidY(v.q, v.r) + 1);
+		fillHexDisc(ctx, v.q, v.r, 3, y, 'dirt');
+		for (let q = v.q - 4; q <= v.q + 4; q++) {
+			for (let r = v.r - 4; r <= v.r + 4; r++) {
+				const d = hexDist(v.q, v.r, q, r);
+				if (d < 3 || d > 4) continue;
+				fillHexColumn(ctx, q, r, 0, y + 1, y + 3, 'stone');
+			}
+		}
+		fillHexDisc(ctx, v.q, v.r, 1, y + 1, 'grass');
+	}
+
+	// Ceremonial ditch and bank around the central monument.
+	for (let q = -19; q <= 19; q++) {
+		for (let r = -19; r <= 19; r++) {
+			const d = hexDist(0, 0, q, r);
+			if (d > 15.5 && d < 17.8) fillHexDisc(ctx, q, r, 0, centerY + 2, 'dirt');
+			if (d > 13.5 && d < 15.2) fillHexDisc(ctx, q, r, 0, centerY + 1, 'sand');
+		}
+	}
 }
 
 function addEgyptLandmarks(ctx: BuildCtx): void {
@@ -207,7 +265,7 @@ function addSanFranciscoLandmarks(ctx: BuildCtx): void {
 function applyLandmarks(ctx: BuildCtx): void {
 	switch (ctx.manifest.id) {
 		case 'grassland-origins':
-			addGrasslandLandmarks(ctx);
+			addStonehengeLandmarks(ctx);
 			return;
 		case 'ancient-egypt':
 			addEgyptLandmarks(ctx);
@@ -290,7 +348,8 @@ export function generateBiomeTerrain(manifest: BiomeManifest, seed: number): Gen
 				}
 			}
 
-			if (hash2(q + seedQ * 1.7, r + seedR * 1.3) > 0.988) {
+			const spawnThreshold = manifest.id === 'grassland-origins' ? 0.979 : 0.988;
+			if (hash2(q + seedQ * 1.7, r + seedR * 1.3) > spawnThreshold) {
 				npcSpawns.push({ q, r });
 			}
 		}
@@ -303,6 +362,24 @@ export function generateBiomeTerrain(manifest: BiomeManifest, seed: number): Gen
 		manifest
 	};
 	applyLandmarks(ctx);
+
+	if (manifest.id === 'grassland-origins') {
+		// Keep Stonehenge world lively with clustered settlements and grazing areas.
+		const extraSpawns = [
+			{ q: -18, r: 12 },
+			{ q: -16, r: 15 },
+			{ q: -14, r: 18 },
+			{ q: -11, r: 13 },
+			{ q: -9, r: 10 },
+			{ q: 16, r: 11 },
+			{ q: 20, r: 15 },
+			{ q: 22, r: 17 },
+			{ q: 11, r: 8 },
+			{ q: 6, r: -8 },
+			{ q: -6, r: -9 }
+		];
+		for (const s of extraSpawns) npcSpawns.push(s);
+	}
 
 	const portalAnchors: GeneratedBiomeData['portalAnchors'] = [];
 	for (const link of manifest.portalLinks) {

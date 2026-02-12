@@ -126,6 +126,11 @@ export class HexWorldGame implements DisposeBag {
 	private touchLookPointerId: number | null = null;
 	private touchLookLastX = 0;
 	private touchLookLastY = 0;
+	private touchTapStartAt = 0;
+	private touchTapStartCount = 0;
+	private touchTapMoved = false;
+	private touchTapStartX = 0;
+	private touchTapStartY = 0;
 
 	private readonly handlers: Array<() => void> = [];
 
@@ -370,6 +375,30 @@ export class HexWorldGame implements DisposeBag {
 			add(target, 'touchend', consumeTouch, passiveFalse);
 			add(target, 'touchcancel', consumeTouch, passiveFalse);
 		}
+		add(
+			this.el.canvas,
+			'touchstart',
+			(e) => this.handleTouchTapStart(e as TouchEvent),
+			passiveFalse
+		);
+		add(
+			this.el.canvas,
+			'touchmove',
+			(e) => this.handleTouchTapMove(e as TouchEvent),
+			passiveFalse
+		);
+		add(
+			this.el.canvas,
+			'touchend',
+			(e) => this.handleTouchTapEnd(e as TouchEvent),
+			passiveFalse
+		);
+		add(
+			this.el.canvas,
+			'touchcancel',
+			(e) => this.handleTouchTapEnd(e as TouchEvent),
+			passiveFalse
+		);
 
 		add(
 			this.el.cta,
@@ -427,9 +456,37 @@ export class HexWorldGame implements DisposeBag {
 		add(this.el.quizCancel, 'pointerdown', () => this.closeQuiz('Quiz cancelled.'));
 
 		this.bindMobileControls(add);
+		this.bindHotbarSelection(add);
 
 		if (this.urlParams.get('mute') === '1') {
 			this.audio.setMuted(true);
+		}
+	}
+
+	private bindHotbarSelection(
+		add: (
+			target: EventTarget,
+			type: string,
+			handler: EventListenerOrEventListenerObject,
+			opts?: AddEventListenerOptions | boolean
+		) => void
+	): void {
+		const slots = this.el.hotbar.querySelectorAll<HTMLDivElement>('.slot');
+		for (const slot of slots) {
+			add(
+				slot,
+				'pointerdown',
+				(e) => {
+					const pe = e as PointerEvent;
+					if (pe.cancelable) pe.preventDefault();
+					const idx = Number.parseInt(slot.dataset.idx || '', 10);
+					if (!Number.isFinite(idx) || idx < 0 || idx >= PALETTE.length) return;
+					this.selectedPaletteIdx = idx;
+					updateHotbar(this.el.hotbar, this.selectedPaletteIdx);
+					this.showToast(`Selected: ${PALETTE[this.selectedPaletteIdx].label}`, 900);
+				},
+				{ passive: false }
+			);
 		}
 	}
 
@@ -583,6 +640,77 @@ export class HexWorldGame implements DisposeBag {
 		}
 	}
 
+	private touchCenter(event: TouchEvent): { x: number; y: number } | null {
+		if (!event.touches.length) return null;
+		let sx = 0;
+		let sy = 0;
+		for (let i = 0; i < event.touches.length; i++) {
+			sx += event.touches[i].clientX;
+			sy += event.touches[i].clientY;
+		}
+		return { x: sx / event.touches.length, y: sy / event.touches.length };
+	}
+
+	private handleTouchTapStart(event: TouchEvent): void {
+		if (!this.touchUiEnabled) return;
+		if (this.menuOpen || this.quizOpen || this.inspect.enabled) return;
+		const now = performance.now();
+		const center = this.touchCenter(event);
+		if (!center) return;
+
+		if (this.touchTapStartCount === 0) {
+			this.touchTapStartAt = now;
+			this.touchTapStartCount = Math.min(2, Math.max(1, event.touches.length));
+			this.touchTapMoved = false;
+			this.touchTapStartX = center.x;
+			this.touchTapStartY = center.y;
+			return;
+		}
+
+		if (event.touches.length >= 2 && now - this.touchTapStartAt < 180) {
+			this.touchTapStartCount = 2;
+		}
+	}
+
+	private handleTouchTapMove(event: TouchEvent): void {
+		if (this.touchTapStartCount === 0) return;
+		const center = this.touchCenter(event);
+		if (!center) return;
+		const moved = Math.hypot(center.x - this.touchTapStartX, center.y - this.touchTapStartY) > 16;
+		if (moved) this.touchTapMoved = true;
+	}
+
+	private handleTouchTapEnd(event: TouchEvent): void {
+		if (!this.touchUiEnabled) return;
+		if (event.touches.length > 0) return;
+		if (this.touchTapStartCount === 0) return;
+
+		const elapsed = performance.now() - this.touchTapStartAt;
+		const isTap = !this.touchTapMoved && elapsed < 280;
+		const fingerCount = this.touchTapStartCount;
+
+		this.touchTapStartCount = 0;
+		this.touchTapMoved = false;
+
+		if (!isTap || this.menuOpen || this.quizOpen || this.inspect.enabled) return;
+		if (fingerCount >= 2) this.tryTouchPlaceAtCenter();
+		else this.tryTouchBreakAtCenter();
+	}
+
+	private tryTouchBreakAtCenter(): void {
+		this.audio.unlock();
+		const hit = this.pickBlock();
+		if (!hit) return;
+		this.removeSelected(hit);
+	}
+
+	private tryTouchPlaceAtCenter(): void {
+		this.audio.unlock();
+		const hit = this.pickBlock();
+		if (!hit) return;
+		this.placeAdjacent(hit, hit.worldNormal);
+	}
+
 	private loadBiome(biomeId: string, fromPortal: boolean): void {
 		const { manifest, data } = this.biomeManager.loadIntoWorld(this.world, biomeId);
 		this.currentBiome = manifest;
@@ -665,11 +793,11 @@ export class HexWorldGame implements DisposeBag {
 		}
 	}
 
-	private createNpcMesh(): THREE.Group {
+	private createVillagerMesh(): THREE.Group {
 		const g = new THREE.Group();
 		const skin = new THREE.MeshStandardMaterial({ color: 0xf2c7a8, roughness: 0.9 });
-		const shirt = new THREE.MeshStandardMaterial({ color: 0x5f92c8, roughness: 0.88 });
-		const pants = new THREE.MeshStandardMaterial({ color: 0x3b4862, roughness: 0.88 });
+		const shirt = new THREE.MeshStandardMaterial({ color: 0x8b6f4b, roughness: 0.9 });
+		const pants = new THREE.MeshStandardMaterial({ color: 0x514236, roughness: 0.92 });
 
 		const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skin);
 		head.position.set(0, 1.38, 0);
@@ -687,23 +815,69 @@ export class HexWorldGame implements DisposeBag {
 		return g;
 	}
 
+	private createAnimalMesh(species: 'aurochs' | 'deer' | 'sheep' | 'boar'): THREE.Group {
+		const g = new THREE.Group();
+		const colorBySpecies: Record<'aurochs' | 'deer' | 'sheep' | 'boar', number> = {
+			aurochs: 0x5d4332,
+			deer: 0x8f6644,
+			sheep: 0xd9d2c5,
+			boar: 0x4d3b2d
+		};
+		const fur = new THREE.MeshStandardMaterial({ color: colorBySpecies[species], roughness: 0.94 });
+		const dark = new THREE.MeshStandardMaterial({ color: 0x2e2520, roughness: 0.96 });
+
+		const body = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.42, 0.36), fur);
+		body.position.set(0, 0.62, 0);
+		const head = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.26, 0.24), fur);
+		head.position.set(0.42, 0.67, 0);
+		const snout = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.1, 0.1), dark);
+		snout.position.set(0.58, 0.63, 0);
+		const legGeo = new THREE.BoxGeometry(0.12, 0.34, 0.12);
+		const legOffsets: Array<[number, number]> = [
+			[-0.22, -0.12],
+			[-0.22, 0.12],
+			[0.22, -0.12],
+			[0.22, 0.12]
+		];
+		for (const [x, z] of legOffsets) {
+			const leg = new THREE.Mesh(legGeo, dark);
+			leg.position.set(x, 0.3, z);
+			g.add(leg);
+		}
+		if (species === 'aurochs' || species === 'boar') {
+			const horn = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.08), dark);
+			const horn2 = horn.clone();
+			horn.position.set(0.34, 0.82, -0.1);
+			horn2.position.set(0.34, 0.82, 0.1);
+			g.add(horn, horn2);
+		}
+		g.add(body, head, snout);
+		return g;
+	}
+
 	private createNpcs(spawns: Array<{ q: number; r: number }>): void {
-		const maxNpcs = 16;
+		const inStonehenge = this.currentBiome?.id === 'grassland-origins';
+		const maxNpcs = inStonehenge ? 28 : 16;
+		const animalKinds: Array<'aurochs' | 'deer' | 'sheep' | 'boar'> = ['aurochs', 'deer', 'sheep', 'boar'];
 		for (let i = 0; i < Math.min(maxNpcs, spawns.length); i++) {
 			const s = spawns[i];
 			const worldPos = axialToWorld(s.q, s.r);
 			const ground = this.world.getGroundY(s.q, s.r);
-			const group = this.createNpcMesh();
+			const kind: 'villager' | 'animal' = inStonehenge && i % 3 !== 0 ? 'animal' : 'villager';
+			const species = kind === 'animal' ? animalKinds[i % animalKinds.length] : undefined;
+			const group = kind === 'animal' ? this.createAnimalMesh(species ?? 'deer') : this.createVillagerMesh();
 			group.position.set(worldPos.x, ground + 0.04, worldPos.z);
 			this.npcGroup.add(group);
 			this.npcs.push({
 				id: `npc-${i}`,
 				group,
+				kind,
+				species,
 				q: s.q,
 				r: s.r,
 				homeQ: s.q,
 				homeR: s.r,
-				speed: 0.9 + Math.random() * 0.8,
+				speed: kind === 'animal' ? 1.05 + Math.random() * 0.85 : 0.78 + Math.random() * 0.72,
 				phase: Math.random() * Math.PI * 2,
 				targetQ: s.q,
 				targetR: s.r
@@ -747,7 +921,8 @@ export class HexWorldGame implements DisposeBag {
 			npc.q = ax.q;
 			npc.r = ax.r;
 			const ground = this.world.getGroundY(ax.q, ax.r);
-			npc.group.position.y = ground + 0.04 + Math.sin(nowMs * 0.006 + npc.phase) * 0.04;
+			const bobAmp = npc.kind === 'animal' ? 0.022 : 0.04;
+			npc.group.position.y = ground + 0.04 + Math.sin(nowMs * 0.006 + npc.phase) * bobAmp;
 		}
 	}
 
