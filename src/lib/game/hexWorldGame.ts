@@ -318,6 +318,14 @@ export class HexWorldGame implements DisposeBag {
 				}
 				return false;
 			}
+			if (action === 'goto_overview') {
+				const overviewAx = { q: -18, r: 18 };
+				const pos = axialToWorld(overviewAx.q, overviewAx.r);
+				const feet = Math.max(this.world.getGroundY(overviewAx.q, overviewAx.r) + 6, 6);
+				this.cameraCtrl.setFeetPosition(pos.x, feet, pos.z);
+				this.cameraCtrl.lookAt(new THREE.Vector3(0, this.world.getGroundY(0, 0) + 3, 0));
+				return true;
+			}
 			if (action === 'remove_top_under_player') {
 				const ax = this.currentAxialUnderPlayer();
 				const y = this.world.getTopSolidY(ax.q, ax.r);
@@ -726,9 +734,22 @@ export class HexWorldGame implements DisposeBag {
 		this.rollWeather(true);
 		this.updateEraBanner();
 
-		const spawn = axialToWorld(0, 0);
-		const ground = this.world.getGroundY(0, 0) + 0.02;
+		const spawnCell =
+			manifest.id === 'grassland-origins'
+				? {
+						q: -16,
+						r: 14
+					}
+				: {
+						q: 0,
+						r: 0
+					};
+		const spawn = axialToWorld(spawnCell.q, spawnCell.r);
+		const ground = this.world.getGroundY(spawnCell.q, spawnCell.r) + 0.02;
 		this.cameraCtrl.setFeetPosition(spawn.x, ground, spawn.z);
+		if (manifest.id === 'grassland-origins') {
+			this.cameraCtrl.lookAt(new THREE.Vector3(0, this.world.getGroundY(0, 0) + 3, 0));
+		}
 		this.biomeManager.saveCurrentState(manifest.id);
 		if (fromPortal) this.audio.playPortal();
 		if (fromPortal) this.showToast(`Arrived in ${manifest.place}`, 2200);

@@ -14,6 +14,14 @@ All previously listed near-term engineering and design tasks are implemented in 
 - [x] Regenerated Stonehenge-facing terrain textures (grass/soil/stone/sand/water) using Nano Banana workflow.
 - [x] Added Stonehenge biome music track and attribution.
 
+## Latest update (2026-02-12, Stonehenge geometry correction pass)
+
+- [x] Generated a larger Stonehenge reference pack (top maps, side elevations, cutaways, village scenes) with Nano Banana and kept all artifacts under `docs/stonehenge-references/`.
+- [x] Added a dedicated split-view debug endpoint (`/debug/stonehenge`) that renders top map + side slices and flags unsupported stone columns.
+- [x] Reworked Stonehenge terrain/landmark algorithm to ground megaliths on flattened ceremonial terrain (ditch + bank + avenue), removing floating stone clusters.
+- [x] Added a unit regression test to detect unsupported/floating Stonehenge stone columns.
+- [x] Added Playwright debug screenshot coverage for the Stonehenge debug endpoint.
+
 ## Current state
 
 - [x] Core sandbox rebuilt into a modular multi-biome game loop.

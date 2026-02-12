@@ -1,5 +1,5 @@
 import { SOLID_BLOCKS, WORLD_MIN_RADIUS } from './constants';
-import { fbm, hash2, hexDist } from './hex';
+import { axialRound, fbm, hash2, hexDist } from './hex';
 import type {
 	BiomeManifest,
 	BlockPlacement,
@@ -63,74 +63,206 @@ function fillHexColumn(
 	}
 }
 
+function smoothStep01(t: number): number {
+	const x = Math.max(0, Math.min(1, t));
+	return x * x * (3 - 2 * x);
+}
+
+function axialLineCells(q0: number, r0: number, q1: number, r1: number): Array<{ q: number; r: number }> {
+	const steps = Math.max(Math.abs(q1 - q0), Math.abs(r1 - r0), Math.abs((q1 + r1) - (q0 + r0)));
+	const out: Array<{ q: number; r: number }> = [];
+	const seen = new Set<string>();
+	for (let i = 0; i <= Math.max(1, steps); i++) {
+		const t = steps === 0 ? 0 : i / steps;
+		const q = q0 + (q1 - q0) * t;
+		const r = r0 + (r1 - r0) * t;
+		const a = axialRound(q, r);
+		const k = `${a.q},${a.r}`;
+		if (seen.has(k)) continue;
+		seen.add(k);
+		out.push(a);
+	}
+	return out;
+}
+
+function paintTrail(
+	ctx: BuildCtx,
+	q0: number,
+	r0: number,
+	q1: number,
+	r1: number,
+	width: number,
+	type: BlockType,
+	resolveY?: (q: number, r: number) => number
+): void {
+	for (const cell of axialLineCells(q0, r0, q1, r1)) {
+		const y = resolveY ? resolveY(cell.q, cell.r) : ctx.getTopSolidY(cell.q, cell.r) + 1;
+		fillHexDisc(ctx, cell.q, cell.r, width, y, type);
+	}
+}
+
+function upliftColumnTo(
+	ctx: BuildCtx,
+	q: number,
+	r: number,
+	targetTopY: number,
+	subsurface: BlockType,
+	surface: BlockType
+): void {
+	const top = ctx.getTopSolidY(q, r);
+	if (top >= targetTopY) return;
+	for (let y = top + 1; y < targetTopY; y++) {
+		ctx.setBlock(q, r, y, subsurface);
+	}
+	ctx.setBlock(q, r, targetTopY, surface);
+}
+
+function circularCells(radius: number): Array<{ q: number; r: number }> {
+	const cells: Array<{ q: number; r: number }> = [];
+	for (let q = -radius; q <= radius; q++) {
+		for (let r = -radius; r <= radius; r++) {
+			if (hexDist(0, 0, q, r) > radius) continue;
+			cells.push({ q, r });
+		}
+	}
+	return cells;
+}
+
+function ringCells(radius: number, count: number, phase = 0): Array<{ q: number; r: number }> {
+	const out: Array<{ q: number; r: number }> = [];
+	const seen = new Set<string>();
+	for (let i = 0; i < count; i++) {
+		const a = phase + (i / count) * Math.PI * 2;
+		const q = Math.round(Math.cos(a) * radius);
+		const r = Math.round(Math.sin(a) * radius);
+		const k = `${q},${r}`;
+		if (seen.has(k)) continue;
+		seen.add(k);
+		out.push({ q, r });
+	}
+	return out;
+}
+
 function addStonehengeLandmarks(ctx: BuildCtx): void {
-	const centerY = Math.max(2, ctx.getTopSolidY(0, 0));
+	const plazaY = Math.max(4, ctx.getTopSolidY(0, 0));
 
-	// Main megalith ring with lintels.
-	const outerCount = 30;
-	const outerRadius = 12;
-	for (let i = 0; i < outerCount; i++) {
-		const a = (i / outerCount) * Math.PI * 2;
-		const q = Math.round(Math.cos(a) * outerRadius);
-		const r = Math.round(Math.sin(a) * outerRadius);
-		const y = Math.max(centerY + 1, ctx.getTopSolidY(q, r) + 1);
-		fillHexColumn(ctx, q, r, 0, y, y + 6, 'stone');
-		fillHexDisc(ctx, q, r, 0, y + 7, 'stone');
+	// Normalize the ceremonial bowl area so megaliths are grounded and not floating.
+	for (const cell of circularCells(22)) {
+		const d = hexDist(0, 0, cell.q, cell.r);
+		let target = plazaY;
+		if (d > 15.4 && d < 16.9) target = plazaY - 1; // ditch ring
+		if (d > 18.2 && d < 20.3) target = plazaY + 1; // bank ring
+		upliftColumnTo(ctx, cell.q, cell.r, target, 'dirt', d < 20 ? 'grass' : 'dirt');
 	}
 
-	// Inner horseshoe trilithons.
+	const groundSnapshot = new Map<string, number>();
+	for (let q = -40; q <= 40; q++) {
+		for (let r = -40; r <= 40; r++) {
+			if (hexDist(0, 0, q, r) > 44) continue;
+			groundSnapshot.set(`${q},${r}`, ctx.getTopSolidY(q, r));
+		}
+	}
+	const groundAt = (q: number, r: number): number =>
+		groundSnapshot.get(`${q},${r}`) ?? ctx.getTopSolidY(q, r);
+
+	// Main sarsen ring with a clear entrance gap toward the avenue (north-east).
+	const sarsenCells = ringCells(11, 34, Math.PI / 22).filter((c) => {
+		const inGap = c.q > 4 && c.r < -4 && Math.abs(c.q + c.r) <= 3;
+		return !inGap;
+	});
+	const sarsenTops: Array<{ q: number; r: number; top: number }> = [];
+	for (let i = 0; i < sarsenCells.length; i++) {
+		const c = sarsenCells[i];
+		const baseY = groundAt(c.q, c.r) + 1;
+		const height = i % 5 === 0 ? 7 : 6;
+		fillHexColumn(ctx, c.q, c.r, 0, baseY, baseY + height, 'stone');
+		sarsenTops.push({ q: c.q, r: c.r, top: baseY + height });
+	}
+	for (let i = 0; i < sarsenTops.length; i++) {
+		const a = sarsenTops[i];
+		const b = sarsenTops[(i + 1) % sarsenTops.length];
+		if (hexDist(a.q, a.r, b.q, b.r) > 3) continue; // don't bridge the entrance gap
+		const lintelY = Math.min(a.top, b.top);
+		for (const cell of axialLineCells(a.q, a.r, b.q, b.r)) {
+			ctx.setBlock(cell.q, cell.r, lintelY, 'stone');
+		}
+	}
+
+	// Inner bluestone ring.
+	for (const c of ringCells(6, 22, Math.PI / 16)) {
+		const baseY = groundAt(c.q, c.r) + 1;
+		const h = (Math.abs(c.q) + Math.abs(c.r)) % 2 === 0 ? 4 : 3;
+		fillHexColumn(ctx, c.q, c.r, 0, baseY, baseY + h, 'stone');
+	}
+
+	// Inner horseshoe of trilithons (larger paired stones with lintels).
 	const trilithons = [
-		{ q: 0, r: -4, h: 8 },
-		{ q: -3, r: -1, h: 7 },
-		{ q: 3, r: -1, h: 7 },
-		{ q: -4, r: 3, h: 6 },
-		{ q: 4, r: 3, h: 6 }
+		{ left: { q: -1, r: 4 }, right: { q: 1, r: 4 }, h: 8 },
+		{ left: { q: -3, r: 2 }, right: { q: -1, r: 2 }, h: 7 },
+		{ left: { q: -4, r: -1 }, right: { q: -2, r: -1 }, h: 7 },
+		{ left: { q: -3, r: -4 }, right: { q: -1, r: -4 }, h: 6 },
+		{ left: { q: 0, r: -6 }, right: { q: 2, r: -6 }, h: 6 }
 	];
-	for (const t of trilithons) {
-		const baseY = Math.max(centerY + 1, ctx.getTopSolidY(t.q, t.r) + 1);
-		fillHexColumn(ctx, t.q, t.r, 0, baseY, baseY + t.h, 'stone');
-		fillHexDisc(ctx, t.q, t.r, 0, baseY + t.h + 1, 'stone');
+	for (const tri of trilithons) {
+		const leftBase = groundAt(tri.left.q, tri.left.r) + 1;
+		const rightBase = groundAt(tri.right.q, tri.right.r) + 1;
+		fillHexColumn(ctx, tri.left.q, tri.left.r, 0, leftBase, leftBase + tri.h, 'stone');
+		fillHexColumn(ctx, tri.right.q, tri.right.r, 0, rightBase, rightBase + tri.h, 'stone');
+		const lintelY = Math.min(leftBase + tri.h, rightBase + tri.h);
+		for (const cell of axialLineCells(tri.left.q, tri.left.r, tri.right.q, tri.right.r)) {
+			ctx.setBlock(cell.q, cell.r, lintelY, 'stone');
+		}
 	}
 
-	// Heel stone + processional avenue.
-	const heelQ = 0;
-	const heelR = -20;
-	const heelY = Math.max(centerY + 1, ctx.getTopSolidY(heelQ, heelR) + 1);
-	fillHexColumn(ctx, heelQ, heelR, 1, heelY, heelY + 8, 'stone');
-	for (let step = -20; step <= -6; step++) {
-		fillHexDisc(ctx, 0, step, 1, centerY + 1, 'sand');
-		fillHexDisc(ctx, 2, step, 1, centerY + 1, 'sand');
-	}
+	// Processional avenue and heel stone.
+	paintTrail(ctx, 6, -6, 28, -28, 1, 'sand', groundAt);
+	paintTrail(ctx, 8, -7, 30, -29, 1, 'sand', groundAt);
+	const heelBase = groundAt(32, -32) + 1;
+	fillHexColumn(ctx, 32, -32, 1, heelBase, heelBase + 8, 'stone');
 
-	// Village roundhouses and animal pens in active-use surroundings.
+	// Roundhouse villages surrounding the henge.
 	const villageCenters = [
-		{ q: -18, r: 12 },
-		{ q: -14, r: 18 },
-		{ q: -9, r: 10 },
-		{ q: 16, r: 11 },
-		{ q: 21, r: 16 }
+		{ q: -24, r: 10 },
+		{ q: -20, r: 18 },
+		{ q: -10, r: 20 },
+		{ q: 18, r: 14 },
+		{ q: 26, r: 20 },
+		{ q: 12, r: -18 }
 	];
-	for (const v of villageCenters) {
-		const y = Math.max(centerY + 1, ctx.getTopSolidY(v.q, v.r) + 1);
-		fillHexDisc(ctx, v.q, v.r, 3, y, 'dirt');
-		for (let q = v.q - 4; q <= v.q + 4; q++) {
-			for (let r = v.r - 4; r <= v.r + 4; r++) {
+	for (let i = 0; i < villageCenters.length; i++) {
+		const v = villageCenters[i];
+		const floorY = groundAt(v.q, v.r);
+		fillHexDisc(ctx, v.q, v.r, 2, floorY, 'dirt');
+		for (let q = v.q - 3; q <= v.q + 3; q++) {
+			for (let r = v.r - 3; r <= v.r + 3; r++) {
 				const d = hexDist(v.q, v.r, q, r);
-				if (d < 3 || d > 4) continue;
-				fillHexColumn(ctx, q, r, 0, y + 1, y + 3, 'stone');
+				if (d < 2 || d > 3) continue;
+				fillHexColumn(ctx, q, r, 0, floorY + 1, floorY + 2, 'stone');
 			}
 		}
-		fillHexDisc(ctx, v.q, v.r, 1, y + 1, 'grass');
+		const roofBase = floorY + 3;
+		fillHexDisc(ctx, v.q, v.r, 2, roofBase, 'sand');
+		fillHexDisc(ctx, v.q, v.r, 1, roofBase + 1, 'sand');
+		fillHexDisc(ctx, v.q, v.r, 0, roofBase + 2, 'sand');
+
+		const penQ = v.q + (i % 2 === 0 ? 4 : -4);
+		const penR = v.r + (i % 2 === 0 ? -2 : 2);
+		const penY = groundAt(penQ, penR);
+		fillHexDisc(ctx, penQ, penR, 2, penY, 'grass');
+		for (let q = penQ - 3; q <= penQ + 3; q++) {
+			for (let r = penR - 3; r <= penR + 3; r++) {
+				const d = hexDist(penQ, penR, q, r);
+				if (d < 2 || d > 3) continue;
+				ctx.setBlock(q, r, penY + 1, 'stone');
+			}
+		}
+
+		paintTrail(ctx, v.q, v.r, 0, 0, 1, 'sand', groundAt);
 	}
 
-	// Ceremonial ditch and bank around the central monument.
-	for (let q = -19; q <= 19; q++) {
-		for (let r = -19; r <= 19; r++) {
-			const d = hexDist(0, 0, q, r);
-			if (d > 15.5 && d < 17.8) fillHexDisc(ctx, q, r, 0, centerY + 2, 'dirt');
-			if (d > 13.5 && d < 15.2) fillHexDisc(ctx, q, r, 0, centerY + 1, 'sand');
-		}
-	}
+	// Internal ceremonial paths.
+	paintTrail(ctx, -9, 0, 9, 0, 1, 'sand', groundAt);
+	paintTrail(ctx, 0, -9, 0, 9, 1, 'sand', groundAt);
 }
 
 function addEgyptLandmarks(ctx: BuildCtx): void {
@@ -329,6 +461,28 @@ export function generateBiomeTerrain(manifest: BiomeManifest, seed: number): Gen
 			const riverCarve = Math.abs(riverNoise - 0.5) < 0.038 ? 2.8 : 0;
 			let h = Math.floor(2 + edgeFalloff * (manifest.heightBoost + 8 * n - riverCarve - ridge * 2.4));
 			h = Math.max(1, Math.min(h, 34));
+
+			if (manifest.id === 'grassland-origins') {
+				const centerNoise = fbm((q + seedQ) * 0.06, (r + seedR) * 0.06);
+				const ceremonialBase = manifest.seaLevel + 5 + Math.floor((centerNoise - 0.5) * 2);
+				const ceremonialBlend = smoothStep01(d / 24);
+				h = Math.round(ceremonialBase * (1 - ceremonialBlend) + h * ceremonialBlend);
+
+				const ditchBand = Math.abs(d - 16.3);
+				if (ditchBand < 1.0) h -= 2;
+				else if (ditchBand < 1.8) h -= 1;
+
+				const bankBand = Math.abs(d - 19.2);
+				if (bankBand < 1.2) h += 1;
+				if (bankBand < 0.55) h += 1;
+
+				const avenueCross = Math.abs(q + r);
+				const avenueAlong = q - r;
+				if (avenueAlong > 8 && avenueAlong < 70 && avenueCross < 2.4) {
+					h = Math.min(h, ceremonialBase);
+				}
+				h = Math.max(2, Math.min(h, 34));
+			}
 
 			const shoreBand = edgeFalloff < 0.25 || Math.abs(riverNoise - 0.5) < 0.065;
 

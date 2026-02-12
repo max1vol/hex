@@ -17,7 +17,7 @@ You travel between large educational biomes (historical eras and places) through
 
 ## Biomes
 
-- Grassland Origins
+- Stonehenge Ritual Plain (Late Neolithic Britain)
 - Ancient Egypt
 - Ice Age Tundra
 - Ancient Rome
@@ -34,6 +34,8 @@ npm run dev
 ```
 
 Open [http://localhost:5173](http://localhost:5173).
+
+Stonehenge geometry debug view: [http://localhost:5173/debug/stonehenge](http://localhost:5173/debug/stonehenge)
 
 ## Checks and tests
 
