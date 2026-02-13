@@ -197,6 +197,24 @@ function makeFireFxFromAtlas(imageName: string, outName: string): void {
 	writePng(path.join(OUT_DIR, outName), out);
 }
 
+function makeFireAtlasFromBlack(imageName: string, outName: string): void {
+	const atlas = readPng(path.join(INPUT_DIR, imageName));
+	const out = new PNG({ width: atlas.width, height: atlas.height });
+	for (let i = 0; i < atlas.data.length; i += 4) {
+		const r = atlas.data[i + 0];
+		const g = atlas.data[i + 1];
+		const b = atlas.data[i + 2];
+		// Black background to alpha, preserving bright flame cores.
+		const maxCh = Math.max(r, g, b);
+		const alpha = clamp8(Math.max(0, (maxCh - 8) * 2.4));
+		out.data[i + 0] = r;
+		out.data[i + 1] = g;
+		out.data[i + 2] = b;
+		out.data[i + 3] = alpha;
+	}
+	writePng(path.join(OUT_DIR, outName), out);
+}
+
 function run(): void {
 	copyTexture('seamless_photorealistic_grass_te.png', 'grass_top.png');
 	copyTexture('realistic_compact_dirt_soil_with.png', 'dirt.png');
@@ -210,6 +228,7 @@ function run(): void {
 	keyOutCheckerboard('realistic_leafy_branch_cluster_s.png', 'leaf_card.png');
 	keyOutCheckerboard('realistic_wild_grass_tuft_sprite.png', 'grass_card.png');
 	makeSmokeFromBlack('campfire_smoke_sprite_on_pure_bl.png', 'smoke.png');
+	makeFireAtlasFromBlack('realistic_flame_sprite_atlas_on_.png', 'fire_atlas.png');
 	makeFireFxFromAtlas('realistic_flame_sprite_atlas_on_.png', 'fire_fx.png');
 
 	console.log('Prepared realistic texture pack in static/textures');

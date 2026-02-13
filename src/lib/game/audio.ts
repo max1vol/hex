@@ -6,6 +6,7 @@ interface BgmTrack {
 }
 
 type SurfaceTone = 'stone' | 'sand' | 'metal' | 'glass' | 'earth';
+type NpcVoiceKind = 'enquire' | 'hurt' | 'death' | 'alert' | 'animal' | 'flee';
 
 const TRACK_FOREST: BgmTrack = { url: '/audio/forest_ambience.mp3', volume: 0.48 };
 const TRACK_DESERT: BgmTrack = { url: '/audio/desert_travel.ogg', volume: 0.42 };
@@ -21,6 +22,15 @@ const TRACK_BY_BIOME: Record<string, BgmTrack> = {
 	'new-york-harbor': TRACK_FOREST,
 	'london-westminster': TRACK_FOREST,
 	'san-francisco-bay': TRACK_FOREST
+};
+
+const NPC_VOICE_CLIP_URLS: Record<NpcVoiceKind, string[]> = {
+	enquire: ['/audio/npc_alert_1.mp3'],
+	hurt: ['/audio/npc_hurt_1.mp3', '/audio/npc_hurt_2.mp3', '/audio/npc_shout_1.mp3'],
+	death: ['/audio/npc_death_1.mp3'],
+	alert: ['/audio/npc_shout_1.mp3', '/audio/npc_alert_1.mp3'],
+	animal: ['/audio/npc_alert_1.mp3'],
+	flee: ['/audio/npc_alert_1.mp3', '/audio/npc_hurt_2.mp3']
 };
 
 export class HexWorldAudio {
@@ -41,6 +51,8 @@ export class HexWorldAudio {
 	private readonly portalSfx = new Audio('/audio/portal.ogg');
 	private sfxCtx: AudioContext | null = null;
 	private breakNoise: AudioBuffer | null = null;
+	private readonly npcVoiceBuffers: Partial<Record<NpcVoiceKind, AudioBuffer[]>> = {};
+	private npcVoiceLoadPromise: Promise<void> | null = null;
 
 	constructor() {
 		this.portalSfx.preload = 'auto';
@@ -141,10 +153,11 @@ export class HexWorldAudio {
 		}
 	}
 
-	playNpcVoice(kind: 'enquire' | 'hurt' | 'death' | 'alert' | 'animal' | 'flee'): void {
+	playNpcVoice(kind: NpcVoiceKind): void {
 		const ctx = this.ensureSfxContext();
 		if (!ctx) return;
 		const now = ctx.currentTime;
+		if (this.playNpcVoiceSample(ctx, kind, now)) return;
 		const chirp = (freq: number, at: number, dur: number, type: OscillatorType, vol: number): void => {
 			const osc = ctx.createOscillator();
 			const gain = ctx.createGain();
@@ -290,6 +303,8 @@ export class HexWorldAudio {
 		if (this.sfxCtx) void this.sfxCtx.close();
 		this.sfxCtx = null;
 		this.breakNoise = null;
+		this.npcVoiceLoadPromise = null;
+		for (const key of Object.keys(this.npcVoiceBuffers) as NpcVoiceKind[]) delete this.npcVoiceBuffers[key];
 	}
 
 	private pickTrack(): BgmTrack {
@@ -349,7 +364,51 @@ export class HexWorldAudio {
 		}
 
 		if (this.sfxCtx.state === 'suspended') void this.sfxCtx.resume().catch(() => {});
+		if (!this.npcVoiceLoadPromise) this.npcVoiceLoadPromise = this.loadNpcVoiceBuffers(this.sfxCtx);
 		return this.sfxCtx;
+	}
+
+	private async loadNpcVoiceBuffers(ctx: AudioContext): Promise<void> {
+		const entries = Object.entries(NPC_VOICE_CLIP_URLS) as Array<[NpcVoiceKind, string[]]>;
+		await Promise.all(
+			entries.map(async ([kind, urls]) => {
+				const decoded: AudioBuffer[] = [];
+				for (const url of urls) {
+					try {
+						const res = await fetch(url);
+						if (!res.ok) continue;
+						const buf = await res.arrayBuffer();
+						const audio = await ctx.decodeAudioData(buf.slice(0));
+						decoded.push(audio);
+					} catch {
+						// Keep going; synth fallback will still work.
+					}
+				}
+				this.npcVoiceBuffers[kind] = decoded;
+			})
+		);
+	}
+
+	private playNpcVoiceSample(ctx: AudioContext, kind: NpcVoiceKind, now: number): boolean {
+		const options = this.npcVoiceBuffers[kind];
+		if (!options?.length) return false;
+		const pick = options[Math.floor(Math.random() * options.length)] ?? options[0];
+		if (!pick) return false;
+		const src = ctx.createBufferSource();
+		src.buffer = pick;
+		const gain = ctx.createGain();
+		const baseGain =
+			kind === 'death' ? 0.35 : kind === 'alert' || kind === 'hurt' ? 0.32 : kind === 'enquire' ? 0.26 : 0.22;
+		const rateJitter = kind === 'death' ? 0.08 : 0.12;
+		src.playbackRate.setValueAtTime(1 + (Math.random() * 2 - 1) * rateJitter, now);
+		gain.gain.setValueAtTime(0.0001, now);
+		gain.gain.exponentialRampToValueAtTime(baseGain, now + 0.015);
+		gain.gain.exponentialRampToValueAtTime(0.0001, now + Math.min(1.2, pick.duration));
+		src.connect(gain);
+		gain.connect(ctx.destination);
+		src.start(now);
+		src.stop(now + Math.min(1.6, pick.duration + 0.02));
+		return true;
 	}
 }
 

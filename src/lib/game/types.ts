@@ -216,7 +216,16 @@ export interface NpcInstance {
 	fleeUntilMs: number;
 	nextSoundAtMs: number;
 	nextEnquireAtMs: number;
-	mood: 'calm' | 'curious' | 'fleeing' | 'aggressive';
+	hurtUntilMs: number;
+	mood: 'calm' | 'curious' | 'fleeing' | 'aggressive' | 'dead' | 'mourning';
+	dead: boolean;
+	buried: boolean;
+	carrierId: string | null;
+	carriedBodyId: string | null;
+	buryTargetQ: number;
+	buryTargetR: number;
+	deathTilt: number;
+	deathRoll: number;
 	yawOffset: number;
 	walkCycle: number;
 	speed: number;

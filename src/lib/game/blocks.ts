@@ -37,8 +37,13 @@ const TEXTURE_PATHS: Record<string, string> = {
 	art: '/textures/street_art.png',
 	timber: '/textures/timber.png',
 	thatch: '/textures/thatch.png',
-	fire: '/textures/fire.png'
+	fire: '/textures/fire_atlas.png'
 };
+
+const FIRE_ATLAS_COLS = 5;
+const FIRE_ATLAS_ROWS = 5;
+const FIRE_ATLAS_PAD = 0.003;
+const FIRE_FRAME_SEQUENCE = [0, 1, 2, 3, 4, 9, 14, 19, 22, 18, 13, 8, 7, 6, 5, 10, 15, 20, 16, 11];
 
 export interface AnimatedTextureRefs {
 	grassTop: THREE.Texture | null;
@@ -60,6 +65,7 @@ function createMaterial(type: BlockType): THREE.MeshLambertMaterial {
 		mat.depthWrite = false;
 		mat.side = THREE.DoubleSide;
 		mat.alphaTest = 0.12;
+		mat.opacity = 0.96;
 	}
 	return mat;
 }
@@ -104,13 +110,20 @@ export async function loadBlockTextures(
 	const textureEntries = Object.entries(TEXTURE_PATHS);
 	const loaded = await Promise.all(
 		textureEntries.map(async ([key, path]) => {
+			const fireAtlas = key === 'fire';
 			const tex = await loadTexture(renderer, loader, path, {
-				wrapS: THREE.RepeatWrapping,
-				wrapT: THREE.RepeatWrapping,
+				wrapS: fireAtlas ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping,
+				wrapT: fireAtlas ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping,
 				minFilter: THREE.LinearMipmapLinearFilter,
 				magFilter: THREE.LinearFilter
 			});
 			if (key === 'grass_side') tex.wrapT = THREE.ClampToEdgeWrapping;
+			if (fireAtlas) {
+				const tw = 1 / FIRE_ATLAS_COLS;
+				const th = 1 / FIRE_ATLAS_ROWS;
+				tex.repeat.set(tw - FIRE_ATLAS_PAD * 2, th - FIRE_ATLAS_PAD * 2);
+				tex.offset.set(FIRE_ATLAS_PAD, 1 - th + FIRE_ATLAS_PAD);
+			}
 			return [key, tex] as const;
 		})
 	);
@@ -202,7 +215,12 @@ export function updateNatureTextureAnimation(refs: AnimatedTextureRefs, nowMs: n
 		refs.water.offset.y = 0.03 * Math.cos(t * 0.56);
 	}
 	if (refs.fire) {
-		refs.fire.offset.y = (t * 0.68) % 1;
-		refs.fire.offset.x = 0.022 * Math.sin(t * 3.4);
+		const tw = 1 / FIRE_ATLAS_COLS;
+		const th = 1 / FIRE_ATLAS_ROWS;
+		const frame = FIRE_FRAME_SEQUENCE[Math.floor(t * 12) % FIRE_FRAME_SEQUENCE.length] ?? 0;
+		const col = frame % FIRE_ATLAS_COLS;
+		const row = Math.floor(frame / FIRE_ATLAS_COLS);
+		refs.fire.offset.x = col * tw + FIRE_ATLAS_PAD;
+		refs.fire.offset.y = 1 - (row + 1) * th + FIRE_ATLAS_PAD;
 	}
 }

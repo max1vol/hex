@@ -58,6 +58,7 @@ interface NpcAnchorPoint {
 }
 
 interface FireFxInstance {
+	fire: THREE.Sprite;
 	smoke: THREE.Sprite;
 	baseX: number;
 	baseY: number;
@@ -79,6 +80,8 @@ const WEATHER_LABEL: Record<WeatherKind, string> = {
 
 const FORBIDDEN_BREAK_BLOCKS = new Set<BlockType>(['bedrock']);
 const STONEHENGE_PLAN_SCALE = 1.35;
+const NPC_HURT_COLOR = new THREE.Color(0xff4b4b);
+const NPC_DEAD_COLOR = new THREE.Color(0x7ca8ff);
 
 export class HexWorldGame implements DisposeBag {
 	private readonly scene: THREE.Scene;
@@ -131,20 +134,24 @@ export class HexWorldGame implements DisposeBag {
 		grassCard: THREE.Texture | null;
 		leafCard: THREE.Texture | null;
 		smoke: THREE.Texture | null;
+		fireFx: THREE.Texture | null;
 	} = {
 		grassCard: null,
 		leafCard: null,
-		smoke: null
+		smoke: null,
+		fireFx: null
 	};
 	private grassCardMaterial: THREE.MeshLambertMaterial | null = null;
 	private leafCardMaterial: THREE.MeshLambertMaterial | null = null;
 	private treeLeafBlockMaterial: THREE.MeshLambertMaterial | null = null;
 	private smokeSpriteMaterial: THREE.SpriteMaterial | null = null;
+	private fireSpriteMaterial: THREE.SpriteMaterial | null = null;
 	private detailDirty = true;
 	private detailCenterQ = Number.NaN;
 	private detailCenterR = Number.NaN;
 	private lastDetailRebuildAt = -Infinity;
 	private readonly npcById = new Map<string, NpcInstance>();
+	private burialAnchors: AxialCoord[] = [];
 
 	private portals: PortalInstance[] = [];
 	private npcs: NpcInstance[] = [];
@@ -328,12 +335,13 @@ export class HexWorldGame implements DisposeBag {
 			}
 		};
 
-		const [grassCard, leafCard, smoke] = await Promise.all([
+		const [grassCard, leafCard, smoke, fireFx] = await Promise.all([
 			load('/textures/grass_card.png'),
 			load('/textures/leaf_card.png'),
-			load('/textures/smoke.png')
+			load('/textures/smoke.png'),
+			load('/textures/fire_fx.png')
 		]);
-		this.detailTextureRefs = { grassCard, leafCard, smoke };
+		this.detailTextureRefs = { grassCard, leafCard, smoke, fireFx };
 
 		this.grassCardMaterial = new THREE.MeshLambertMaterial({
 			map: grassCard ?? undefined,
@@ -361,6 +369,15 @@ export class HexWorldGame implements DisposeBag {
 			depthWrite: false,
 			depthTest: true
 		});
+		this.fireSpriteMaterial = new THREE.SpriteMaterial({
+			map: fireFx ?? undefined,
+			color: 0xffffff,
+			transparent: true,
+			opacity: 0.95,
+			blending: THREE.AdditiveBlending,
+			depthWrite: false,
+			depthTest: true
+		});
 	}
 
 	private disposeDetailAssets(): void {
@@ -372,8 +389,10 @@ export class HexWorldGame implements DisposeBag {
 		this.treeLeafBlockMaterial = null;
 		this.smokeSpriteMaterial?.dispose();
 		this.smokeSpriteMaterial = null;
+		this.fireSpriteMaterial?.dispose();
+		this.fireSpriteMaterial = null;
 		for (const tex of Object.values(this.detailTextureRefs)) tex?.dispose();
-		this.detailTextureRefs = { grassCard: null, leafCard: null, smoke: null };
+		this.detailTextureRefs = { grassCard: null, leafCard: null, smoke: null, fireFx: null };
 	}
 
 	private installGlobalHooks(): void {
@@ -909,11 +928,13 @@ export class HexWorldGame implements DisposeBag {
 		for (const npc of this.npcs) this.npcGroup.remove(npc.group);
 		this.npcs = [];
 		this.npcById.clear();
+		this.burialAnchors = [];
 	}
 
 	private clearDetailDecor(): void {
 		for (const fx of this.fireFx) {
-			this.detailGroup.remove(fx.smoke);
+			this.detailGroup.remove(fx.fire, fx.smoke);
+			(fx.fire.material as THREE.SpriteMaterial).dispose();
 			(fx.smoke.material as THREE.SpriteMaterial).dispose();
 		}
 		this.fireFx = [];
@@ -1144,21 +1165,26 @@ export class HexWorldGame implements DisposeBag {
 
 	private rebuildFireFx(): void {
 		for (const fx of this.fireFx) {
-			this.detailGroup.remove(fx.smoke);
+			this.detailGroup.remove(fx.fire, fx.smoke);
+			(fx.fire.material as THREE.SpriteMaterial).dispose();
 			(fx.smoke.material as THREE.SpriteMaterial).dispose();
 		}
 		this.fireFx = [];
-		if (!this.smokeSpriteMaterial) return;
+		if (!this.fireSpriteMaterial || !this.smokeSpriteMaterial) return;
 
 		let count = 0;
 		for (const mesh of this.world.blocks.values()) {
 			const ud = mesh.userData as BlockUserData;
 			if (ud.typeKey !== 'fire') continue;
+			const fire = new THREE.Sprite(this.fireSpriteMaterial.clone());
 			const smoke = new THREE.Sprite(this.smokeSpriteMaterial.clone());
+			fire.position.set(mesh.position.x, mesh.position.y + 0.62, mesh.position.z);
+			fire.scale.set(0.95, 1.4, 1);
 			smoke.position.set(mesh.position.x, mesh.position.y + 1.1, mesh.position.z);
 			smoke.scale.set(0.7, 0.7, 1);
-			this.detailGroup.add(smoke);
+			this.detailGroup.add(fire, smoke);
 			this.fireFx.push({
+				fire,
 				smoke,
 				baseX: mesh.position.x,
 				baseY: mesh.position.y,
@@ -1173,6 +1199,12 @@ export class HexWorldGame implements DisposeBag {
 	private updateFireFx(nowMs: number): void {
 		for (const fx of this.fireFx) {
 			const t = nowMs * 0.001 + fx.phase;
+			const pulse = 0.85 + Math.sin(t * 6.2) * 0.16;
+			const fireMat = fx.fire.material as THREE.SpriteMaterial;
+			fireMat.opacity = 0.78 + Math.sin(t * 8.1) * 0.15;
+			fx.fire.position.set(fx.baseX, fx.baseY + 0.62 + Math.sin(t * 5.4) * 0.05, fx.baseZ);
+			fx.fire.scale.set(0.92 * pulse, 1.34 * pulse, 1);
+
 			const smokeMat = fx.smoke.material as THREE.SpriteMaterial;
 			const cycle = (t * 0.22) % 1;
 			smokeMat.opacity = Math.max(0, 0.42 * (1 - cycle));
@@ -1235,11 +1267,13 @@ export class HexWorldGame implements DisposeBag {
 	private createVillagerMesh(): THREE.Group {
 		const g = new THREE.Group();
 		const skin = new THREE.MeshStandardMaterial({ color: 0xf2c7a8, roughness: 0.9 });
+		const face = skin.clone();
 		const shirt = new THREE.MeshStandardMaterial({ color: 0x8b6f4b, roughness: 0.9 });
 		const pants = new THREE.MeshStandardMaterial({ color: 0x514236, roughness: 0.92 });
 
-		const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), skin);
+		const head = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), face);
 		head.position.set(0, 1.34, 0);
+		head.name = 'head';
 		const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.34), shirt);
 		body.position.set(0, 0.88, 0);
 		const legL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.52, 0.18), pants);
@@ -1307,6 +1341,7 @@ export class HexWorldGame implements DisposeBag {
 		const ritualAnchors = inStonehenge ? this.scalePlanCells(STONEHENGE_PLAN.standingStoneSeeds, STONEHENGE_PLAN_SCALE) : [];
 		const hearthAnchors = inStonehenge ? this.scalePlanCells(STONEHENGE_PLAN.hearthCenters, STONEHENGE_PLAN_SCALE) : [];
 		const villageAnchors = inStonehenge ? this.scalePlanCells(STONEHENGE_PLAN.hutCenters, STONEHENGE_PLAN_SCALE) : [];
+		this.burialAnchors = villageAnchors.length ? [...villageAnchors] : spawns.slice(0, Math.min(8, spawns.length));
 		const pickAnchor = (arr: NpcAnchorPoint[], idx: number, fallback: { q: number; r: number }): { q: number; r: number } =>
 			arr.length ? arr[idx % arr.length] : fallback;
 
@@ -1355,7 +1390,16 @@ export class HexWorldGame implements DisposeBag {
 				fleeUntilMs: 0,
 				nextSoundAtMs: 0,
 				nextEnquireAtMs: performance.now() + 1800 + Math.random() * 2600,
+				hurtUntilMs: 0,
 				mood: 'calm',
+				dead: false,
+				buried: false,
+				carrierId: null,
+				carriedBodyId: null,
+				buryTargetQ: anchor.q,
+				buryTargetR: anchor.r,
+				deathTilt: -(Math.PI * (0.42 + Math.random() * 0.08)),
+				deathRoll: (Math.random() - 0.5) * 0.5,
 				yawOffset: 0,
 				walkCycle: Math.random() * Math.PI * 2,
 				speed: kind === 'animal' ? 1.05 + Math.random() * 0.85 : 0.78 + Math.random() * 0.72,
@@ -1373,18 +1417,10 @@ export class HexWorldGame implements DisposeBag {
 	}
 
 	private assignNpcTarget(npc: NpcInstance): void {
-		const biomeRadius = this.currentBiome?.radius ?? WORLD_MIN_RADIUS;
 		const pickAround = (q0: number, r0: number, rad: number): { q: number; r: number } => ({
 			q: q0 + Math.floor(Math.random() * (rad * 2 + 1)) - rad,
 			r: r0 + Math.floor(Math.random() * (rad * 2 + 1)) - rad
 		});
-		const isWalkable = (q: number, r: number): boolean => {
-			if (hexDist(0, 0, q, r) > biomeRadius + 2) return false;
-			const top = this.world.getTopSolidY(q, r);
-			if (top < 1) return false;
-			const topType = this.world.getType(q, r, top);
-			return topType !== 'water' && topType !== 'fire';
-		};
 
 		for (let i = 0; i < 20; i++) {
 			let cand: { q: number; r: number };
@@ -1412,13 +1448,22 @@ export class HexWorldGame implements DisposeBag {
 					cand = pickAround(npc.homeQ, npc.homeR, 5);
 					break;
 			}
-			if (!isWalkable(cand.q, cand.r)) continue;
+			if (!this.isWalkableNpcCell(cand.q, cand.r)) continue;
 			npc.targetQ = cand.q;
 			npc.targetR = cand.r;
 			return;
 		}
 		npc.targetQ = npc.anchorQ;
 		npc.targetR = npc.anchorR;
+	}
+
+	private isWalkableNpcCell(q: number, r: number): boolean {
+		const biomeRadius = this.currentBiome?.radius ?? WORLD_MIN_RADIUS;
+		if (hexDist(0, 0, q, r) > biomeRadius + 2) return false;
+		const top = this.world.getTopSolidY(q, r);
+		if (top < 1) return false;
+		const topType = this.world.getType(q, r, top);
+		return topType !== 'water' && topType !== 'fire';
 	}
 
 	private animateNpcRig(npc: NpcInstance, dt: number, moving: boolean): void {
@@ -1458,6 +1503,127 @@ export class HexWorldGame implements DisposeBag {
 		return d;
 	}
 
+	private updateNpcVisualState(npc: NpcInstance, nowMs: number): void {
+		const hurt = !npc.dead && nowMs < npc.hurtUntilMs;
+		const tint = npc.dead ? NPC_DEAD_COLOR : hurt ? NPC_HURT_COLOR : null;
+		const tintMix = npc.dead ? 0.4 : hurt ? 0.3 : 0;
+		const emissiveStrength = npc.dead ? 0.6 : hurt ? 0.45 : 0;
+
+		npc.group.traverse((obj) => {
+			if (!(obj instanceof THREE.Mesh)) return;
+			const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+			for (const mat of mats) {
+				const meshMat = mat as THREE.MeshStandardMaterial | THREE.MeshLambertMaterial;
+				if (!('color' in meshMat)) continue;
+				const ud = meshMat.userData as { baseColor?: THREE.Color };
+				if (!ud.baseColor) ud.baseColor = meshMat.color.clone();
+				meshMat.color.copy(ud.baseColor);
+				if (tint) meshMat.color.lerp(tint, tintMix);
+				if ('emissive' in meshMat) {
+					if (tint) meshMat.emissive.copy(tint);
+					else meshMat.emissive.set(0x000000);
+					if ('emissiveIntensity' in meshMat) {
+						(meshMat as THREE.MeshStandardMaterial).emissiveIntensity = emissiveStrength;
+					}
+				}
+			}
+		});
+
+		const head = npc.group.getObjectByName('head');
+		if (head instanceof THREE.Mesh && head.material instanceof THREE.MeshStandardMaterial) {
+			const headMat = head.material;
+			const ud = headMat.userData as { baseColor?: THREE.Color };
+			if (!ud.baseColor) ud.baseColor = headMat.color.clone();
+			headMat.color.copy(ud.baseColor);
+			if (npc.dead) headMat.color.lerp(NPC_DEAD_COLOR, 0.62);
+			else if (hurt) headMat.color.lerp(NPC_HURT_COLOR, 0.74);
+		}
+	}
+
+	private pickBurialTargetFor(npc: NpcInstance): { q: number; r: number } {
+		const anchors = this.burialAnchors.length
+			? this.burialAnchors
+			: [{ q: npc.anchorQ + 6, r: npc.anchorR + 4 }];
+		const start = Math.floor(hash2(npc.q * 1.7 + npc.phase, npc.r * 2.3 - npc.phase) * anchors.length);
+		for (let i = 0; i < anchors.length; i++) {
+			const cand = anchors[(start + i) % anchors.length];
+			if (cand && this.isWalkableNpcCell(cand.q, cand.r)) return cand;
+		}
+		return { q: npc.anchorQ, r: npc.anchorR };
+	}
+
+	private assignCorpseDuty(npc: NpcInstance, nowMs: number): void {
+		if (npc.dead || npc.kind !== 'villager' || npc.carriedBodyId || npc.mood === 'fleeing') return;
+		let pick: NpcInstance | null = null;
+		let best = Number.POSITIVE_INFINITY;
+		for (const corpse of this.npcs) {
+			if (!corpse.dead || corpse.kind !== 'villager' || corpse.buried || corpse.carrierId) continue;
+			if (corpse.id === npc.id) continue;
+			const d = hexDist(npc.q, npc.r, corpse.q, corpse.r);
+			if (d > 10 || d >= best) continue;
+			best = d;
+			pick = corpse;
+		}
+		if (!pick) return;
+
+		pick.carrierId = npc.id;
+		npc.carriedBodyId = pick.id;
+		const target = this.pickBurialTargetFor(npc);
+		npc.buryTargetQ = target.q;
+		npc.buryTargetR = target.r;
+		npc.mood = 'mourning';
+		npc.idleUntilMs = 0;
+		if (nowMs > npc.nextSoundAtMs) {
+			this.audio.playNpcVoice('alert');
+			npc.nextSoundAtMs = nowMs + 1800 + Math.random() * 1700;
+		}
+	}
+
+	private updateCarriedCorpses(nowMs: number): void {
+		for (const carrier of this.npcs) {
+			if (!carrier.carriedBodyId || carrier.dead) continue;
+			const corpse = this.npcById.get(carrier.carriedBodyId);
+			if (!corpse || !corpse.dead || corpse.buried) {
+				carrier.carriedBodyId = null;
+				if (carrier.mood === 'mourning') carrier.mood = 'calm';
+				continue;
+			}
+			corpse.carrierId = carrier.id;
+
+			const distToCorpse = Math.hypot(
+				corpse.group.position.x - carrier.group.position.x,
+				corpse.group.position.z - carrier.group.position.z
+			);
+			if (distToCorpse > 1.4) continue;
+
+			const yaw = carrier.group.rotation.y - carrier.yawOffset;
+			const ox = -Math.sin(yaw) * 0.26;
+			const oz = -Math.cos(yaw) * 0.26;
+			const ground = this.world.getGroundY(carrier.q, carrier.r);
+			corpse.group.position.set(carrier.group.position.x + ox, ground + 0.08, carrier.group.position.z + oz);
+			corpse.group.rotation.x = corpse.deathTilt;
+			corpse.group.rotation.z = corpse.deathRoll;
+			corpse.q = carrier.q;
+			corpse.r = carrier.r;
+
+			if (hexDist(carrier.q, carrier.r, carrier.buryTargetQ, carrier.buryTargetR) <= 1) {
+				corpse.carrierId = null;
+				corpse.buried = true;
+				corpse.q = carrier.buryTargetQ;
+				corpse.r = carrier.buryTargetR;
+				const buryPos = axialToWorld(corpse.q, corpse.r);
+				const buryGround = this.world.getGroundY(corpse.q, corpse.r);
+				corpse.group.position.set(buryPos.x, buryGround + 0.06, buryPos.z);
+				corpse.group.rotation.x = corpse.deathTilt;
+				corpse.group.rotation.z = corpse.deathRoll;
+				carrier.carriedBodyId = null;
+				carrier.mood = 'calm';
+				carrier.idleUntilMs = nowMs + 1200 + Math.random() * 1200;
+				if (nowMs - this.lastToastAt > 3000) this.showToast('Villagers carried the fallen to a burial place.', 1500);
+			}
+		}
+	}
+
 	private updateNpcs(dt: number, nowMs: number): void {
 		const playerAx = this.currentAxialUnderPlayer();
 		const playerX = this.cameraCtrl.yawObject.position.x;
@@ -1472,7 +1638,23 @@ export class HexWorldGame implements DisposeBag {
 		for (const npc of this.npcs) {
 			const visible = hexDist(playerAx.q, playerAx.r, npc.q, npc.r) <= this.renderRadius;
 			npc.group.visible = visible;
+			this.updateNpcVisualState(npc, nowMs);
 			if (!visible) continue;
+
+			if (npc.dead) {
+				if (!npc.carrierId) {
+					const ground = this.world.getGroundY(npc.q, npc.r);
+					npc.group.position.y = ground + 0.06;
+					npc.group.rotation.x += (npc.deathTilt - npc.group.rotation.x) * Math.min(1, dt * 10);
+					npc.group.rotation.z += (npc.deathRoll - npc.group.rotation.z) * Math.min(1, dt * 10);
+				}
+				this.animateNpcRig(npc, dt, false);
+				continue;
+			}
+
+			npc.group.rotation.x += (0 - npc.group.rotation.x) * Math.min(1, dt * 10);
+			npc.group.rotation.z += (0 - npc.group.rotation.z) * Math.min(1, dt * 10);
+
 			const dxPlayer = playerX - npc.group.position.x;
 			const dzPlayer = playerZ - npc.group.position.z;
 			const distToPlayer = Math.hypot(dxPlayer, dzPlayer);
@@ -1485,7 +1667,7 @@ export class HexWorldGame implements DisposeBag {
 				}
 				this.forceNpcFlee(npc, Math.max(0, npc.fleeUntilMs - nowMs));
 			} else if (npc.mood === 'fleeing') {
-				npc.mood = 'calm';
+				npc.mood = npc.carriedBodyId ? 'mourning' : 'calm';
 			}
 
 			if (npc.kind === 'animal' && npc.mood !== 'fleeing' && distToPlayer < 3.9) {
@@ -1496,9 +1678,12 @@ export class HexWorldGame implements DisposeBag {
 				}
 			}
 
+			if (!npc.carriedBodyId) this.assignCorpseDuty(npc, nowMs);
+
 			if (
 				npc.kind === 'villager' &&
 				npc.mood !== 'fleeing' &&
+				!npc.carriedBodyId &&
 				distToPlayer < 4.8 &&
 				nowMs > npc.nextEnquireAtMs
 			) {
@@ -1514,7 +1699,27 @@ export class HexWorldGame implements DisposeBag {
 				if (nowMs - this.lastToastAt > 1600) this.showToast(msg, 1500);
 			}
 
-			if (npc.idleUntilMs > nowMs) {
+			if (npc.carriedBodyId) {
+				const corpse = this.npcById.get(npc.carriedBodyId);
+				if (!corpse || !corpse.dead || corpse.buried) {
+					npc.carriedBodyId = null;
+					if (npc.mood === 'mourning') npc.mood = 'calm';
+				} else {
+					const distToCorpse = Math.hypot(
+						corpse.group.position.x - npc.group.position.x,
+						corpse.group.position.z - npc.group.position.z
+					);
+					if (distToCorpse > 1.1) {
+						npc.targetQ = corpse.q;
+						npc.targetR = corpse.r;
+					} else {
+						npc.targetQ = npc.buryTargetQ;
+						npc.targetR = npc.buryTargetR;
+					}
+				}
+			}
+
+			if (npc.idleUntilMs > nowMs && !npc.carriedBodyId) {
 				const ax = worldToAxial(npc.group.position.x, npc.group.position.z);
 				const ground = this.world.getGroundY(ax.q, ax.r);
 				const bob = npc.kind === 'animal' ? 0.01 : 0.015;
@@ -1529,6 +1734,7 @@ export class HexWorldGame implements DisposeBag {
 			const dist = Math.hypot(dx, dz);
 
 			if (dist < 0.25) {
+				if (npc.carriedBodyId) continue;
 				const pause =
 					npc.activity === 'ritual'
 						? 240 + Math.random() * 680
@@ -1550,7 +1756,7 @@ export class HexWorldGame implements DisposeBag {
 			let repelX = 0;
 			let repelZ = 0;
 			for (const other of this.npcs) {
-				if (other.id === npc.id || !other.group.visible) continue;
+				if (other.id === npc.id || !other.group.visible || other.dead) continue;
 				const ox = npc.group.position.x - other.group.position.x;
 				const oz = npc.group.position.z - other.group.position.z;
 				const od = Math.hypot(ox, oz);
@@ -1586,6 +1792,7 @@ export class HexWorldGame implements DisposeBag {
 			npc.group.position.y = ground + npc.groundOffset + Math.sin(nowMs * 0.006 + npc.phase) * bobAmp;
 			this.animateNpcRig(npc, dt, true);
 		}
+		this.updateCarriedCorpses(nowMs);
 	}
 
 	private onKeyDown(e: KeyboardEvent): void {
@@ -1818,7 +2025,7 @@ export class HexWorldGame implements DisposeBag {
 			const npcId = (hit.object.userData as { npcId?: string }).npcId;
 			if (!npcId) continue;
 			const npc = this.npcById.get(npcId);
-			if (!npc) continue;
+			if (!npc || npc.dead) continue;
 			return { npc, distance: hit.distance };
 		}
 		return null;
@@ -1834,6 +2041,7 @@ export class HexWorldGame implements DisposeBag {
 	}
 
 	private forceNpcFlee(npc: NpcInstance, panicMs: number): void {
+		if (npc.dead) return;
 		npc.mood = 'fleeing';
 		npc.fleeUntilMs = performance.now() + panicMs;
 		const playerAx = this.currentAxialUnderPlayer();
@@ -1848,20 +2056,48 @@ export class HexWorldGame implements DisposeBag {
 	}
 
 	private hitNpc(npc: NpcInstance): void {
+		if (npc.dead) return;
+		const nowMs = performance.now();
 		npc.health -= 2;
+		npc.hurtUntilMs = nowMs + 950;
 		npc.mood = 'aggressive';
 		this.audio.playNpcVoice('hurt');
+		if (npc.kind === 'villager') this.audio.playNpcVoice('alert');
 		if (npc.health <= 0) {
 			this.audio.playNpcVoice('death');
-			this.showToast(npc.kind === 'animal' ? 'Animal defeated.' : 'Villager defeated.', 900);
-			this.npcGroup.remove(npc.group);
-			this.npcs = this.npcs.filter((n) => n.id !== npc.id);
-			this.npcById.delete(npc.id);
+			npc.health = 0;
+			npc.dead = true;
+			npc.buried = false;
+			npc.carriedBodyId = null;
+			npc.carrierId = null;
+			npc.mood = 'dead';
+			npc.fleeUntilMs = 0;
+			npc.idleUntilMs = 0;
+			npc.group.rotation.x = npc.deathTilt;
+			npc.group.rotation.z = npc.deathRoll;
+			const g = this.world.getGroundY(npc.q, npc.r);
+			npc.group.position.y = g + 0.06;
+			this.showToast(npc.kind === 'animal' ? 'Animal defeated.' : 'Villager down! Others are reacting.', 1100);
+			if (npc.kind === 'villager') {
+				for (const other of this.npcs) {
+					if (other.id === npc.id || other.kind !== 'villager' || other.dead) continue;
+					if (hexDist(other.q, other.r, npc.q, npc.r) > 14) continue;
+					other.mood = other.carriedBodyId ? other.mood : 'mourning';
+					other.idleUntilMs = 0;
+					other.nextEnquireAtMs = nowMs + 12000 + Math.random() * 14000;
+					if (nowMs > other.nextSoundAtMs && Math.random() < 0.45) {
+						this.audio.playNpcVoice('alert');
+						other.nextSoundAtMs = nowMs + 1600 + Math.random() * 2200;
+					}
+				}
+			}
 			return;
 		}
 		this.forceNpcFlee(npc, npc.kind === 'animal' ? 9000 : 7000);
-		this.audio.playNpcVoice('flee');
-		const bark = npc.kind === 'animal' ? 'Animal startled and ran away.' : 'Villager: Hey! Why did you hit me?';
+		const bark =
+			npc.kind === 'animal'
+				? 'Animal startled and ran away.'
+				: 'Villager shouts: Agh! Stop that!';
 		this.showToast(bark, 1300);
 	}
 

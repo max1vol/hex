@@ -11,7 +11,7 @@ const VIEWS = [
 	},
 	{
 		name: 'fire-top',
-		query: '/?inspect=1&type=fire&ui=1&angle=0&dist=0.05&height=7.6'
+		query: '/?inspect=1&type=fire&ui=1&angle=0&dist=0.05&height=5.2'
 	},
 	{
 		name: 'fire-natural',

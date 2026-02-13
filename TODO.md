@@ -64,6 +64,18 @@ All previously listed near-term engineering and design tasks are implemented in 
 - [x] Added synthesized NPC voice SFX variants (`enquire`, `hurt`, `death`, `flee`, `animal`, `alert`) and hooked them into behavior transitions.
 - [x] Revalidated with automated checks (`npm run test:unit`, `npm run check`, `npm run test:e2e`).
 
+## Latest update (2026-02-13, realistic fire + villager death-response pass)
+
+- [x] Upgraded fire block visuals to realistic animated flame atlas frames (`/textures/fire_atlas.png`) on crossed X-planes; kept alignment validation in inspect side/top/natural screenshots.
+- [x] Reintroduced additive flame sprite + smoke sprite ambience for hearths so in-world fire looks vivid (while keeping fire as a true block).
+- [x] Added texture pipeline support to generate alpha-keyed fire atlas from Nano Banana outputs (`scripts/textures/prepare-realistic-textures.ts`).
+- [x] Added CC0 NPC voice clips (hurt/shout/alert/death) and integrated sample playback with synth fallback in the audio engine.
+- [x] Added stronger combat readability for NPCs:
+  - face/body turn red briefly when hit,
+  - bodies turn blue-ish when dead,
+  - dead NPCs remain on the ground in a lying pose.
+- [x] Added villager social reaction to deaths: nearby villagers detect fallen villagers, shout/alert, and can carry bodies to burial locations near settlement anchors.
+
 ## Current state
 
 - [x] Core sandbox rebuilt into a modular multi-biome game loop.
