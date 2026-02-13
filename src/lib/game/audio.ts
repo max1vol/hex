@@ -141,6 +141,54 @@ export class HexWorldAudio {
 		}
 	}
 
+	playNpcVoice(kind: 'enquire' | 'hurt' | 'death' | 'alert' | 'animal' | 'flee'): void {
+		const ctx = this.ensureSfxContext();
+		if (!ctx) return;
+		const now = ctx.currentTime;
+		const chirp = (freq: number, at: number, dur: number, type: OscillatorType, vol: number): void => {
+			const osc = ctx.createOscillator();
+			const gain = ctx.createGain();
+			osc.type = type;
+			osc.frequency.setValueAtTime(freq, at);
+			gain.gain.setValueAtTime(0.0001, at);
+			gain.gain.exponentialRampToValueAtTime(vol, at + 0.01);
+			gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+			osc.connect(gain);
+			gain.connect(ctx.destination);
+			osc.start(at);
+			osc.stop(at + dur + 0.01);
+		};
+
+		if (kind === 'enquire') {
+			chirp(310, now, 0.12, 'triangle', 0.08);
+			chirp(370, now + 0.08, 0.12, 'triangle', 0.07);
+			return;
+		}
+		if (kind === 'alert') {
+			chirp(260, now, 0.1, 'square', 0.1);
+			chirp(220, now + 0.09, 0.11, 'square', 0.09);
+			return;
+		}
+		if (kind === 'hurt') {
+			chirp(180, now, 0.14, 'sawtooth', 0.12);
+			chirp(140, now + 0.08, 0.16, 'sawtooth', 0.09);
+			return;
+		}
+		if (kind === 'death') {
+			chirp(160, now, 0.18, 'triangle', 0.12);
+			chirp(120, now + 0.12, 0.22, 'triangle', 0.1);
+			chirp(90, now + 0.22, 0.24, 'sine', 0.08);
+			return;
+		}
+		if (kind === 'flee') {
+			chirp(240, now, 0.09, 'square', 0.09);
+			chirp(320, now + 0.07, 0.09, 'square', 0.085);
+			return;
+		}
+		chirp(200 + Math.random() * 130, now, 0.1, 'triangle', 0.07);
+		chirp(170 + Math.random() * 110, now + 0.09, 0.11, 'triangle', 0.06);
+	}
+
 	playPlace(typeKey: BlockType): void {
 		const ctx = this.ensureSfxContext();
 		if (!ctx || !this.breakNoise) return;

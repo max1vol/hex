@@ -52,6 +52,18 @@ All previously listed near-term engineering and design tasks are implemented in 
 - [x] Switched Stonehenge trees to block-based generation (trunk + leaf block clusters) instead of billboard leaf planes.
 - [x] Added articulated procedural walking animation for villagers and animals (limb swing), plus heading-first movement to avoid side-sliding.
 
+## Latest update (2026-02-13, fire inspect fix + NPC interaction pass)
+
+- [x] Fixed fire block rendering path to use explicit crossed `X`-aligned vertical planes (custom fire geometry + single fire material binding).
+- [x] Fixed inspect camera math so captures use real eye height and target block center; regenerated side/top/natural fire block screenshots under `docs/images/block-inspect/`.
+- [x] Removed duplicate sprite-fire overlay and kept smoke as the additive fire ambience layer.
+- [x] Added basic NPC combat + reaction loop:
+  - player can hit villagers/animals via center reticle (mouse and touch single-tap),
+  - NPC health, flee behavior, and defeat removal,
+  - villagers can enquire when player approaches; animals react and flee.
+- [x] Added synthesized NPC voice SFX variants (`enquire`, `hurt`, `death`, `flee`, `animal`, `alert`) and hooked them into behavior transitions.
+- [x] Revalidated with automated checks (`npm run test:unit`, `npm run check`, `npm run test:e2e`).
+
 ## Current state
 
 - [x] Core sandbox rebuilt into a modular multi-biome game loop.

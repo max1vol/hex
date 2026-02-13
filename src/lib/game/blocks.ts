@@ -37,7 +37,7 @@ const TEXTURE_PATHS: Record<string, string> = {
 	art: '/textures/street_art.png',
 	timber: '/textures/timber.png',
 	thatch: '/textures/thatch.png',
-	fire: '/textures/fire_fx.png'
+	fire: '/textures/fire.png'
 };
 
 export interface AnimatedTextureRefs {
@@ -58,6 +58,8 @@ function createMaterial(type: BlockType): THREE.MeshLambertMaterial {
 	});
 	if (type === 'fire') {
 		mat.depthWrite = false;
+		mat.side = THREE.DoubleSide;
+		mat.alphaTest = 0.12;
 	}
 	return mat;
 }
@@ -103,8 +105,8 @@ export async function loadBlockTextures(
 	const loaded = await Promise.all(
 		textureEntries.map(async ([key, path]) => {
 			const tex = await loadTexture(renderer, loader, path, {
-				wrapS: key === 'fire' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping,
-				wrapT: key === 'fire' ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping,
+				wrapS: THREE.RepeatWrapping,
+				wrapT: THREE.RepeatWrapping,
 				minFilter: THREE.LinearMipmapLinearFilter,
 				magFilter: THREE.LinearFilter
 			});
@@ -200,7 +202,7 @@ export function updateNatureTextureAnimation(refs: AnimatedTextureRefs, nowMs: n
 		refs.water.offset.y = 0.03 * Math.cos(t * 0.56);
 	}
 	if (refs.fire) {
-		refs.fire.offset.x = 0;
-		refs.fire.offset.y = 0;
+		refs.fire.offset.y = (t * 0.68) % 1;
+		refs.fire.offset.x = 0.022 * Math.sin(t * 3.4);
 	}
 }

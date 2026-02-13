@@ -5,6 +5,7 @@ import {
 	HEX_RADIUS,
 	MAX_Y,
 	PALETTE,
+	PLAYER_EYE_HEIGHT,
 	PLAYER_MOVE_SPEED,
 	STEP_ACROSS_SIDE,
 	WORLD_MIN_RADIUS
@@ -57,12 +58,16 @@ interface NpcAnchorPoint {
 }
 
 interface FireFxInstance {
-	fire: THREE.Sprite;
 	smoke: THREE.Sprite;
 	baseX: number;
 	baseY: number;
 	baseZ: number;
 	phase: number;
+}
+
+interface NpcPickHit {
+	npc: NpcInstance;
+	distance: number;
 }
 
 const WEATHER_LABEL: Record<WeatherKind, string> = {
@@ -126,22 +131,20 @@ export class HexWorldGame implements DisposeBag {
 		grassCard: THREE.Texture | null;
 		leafCard: THREE.Texture | null;
 		smoke: THREE.Texture | null;
-		fireFx: THREE.Texture | null;
 	} = {
 		grassCard: null,
 		leafCard: null,
-		smoke: null,
-		fireFx: null
+		smoke: null
 	};
 	private grassCardMaterial: THREE.MeshLambertMaterial | null = null;
 	private leafCardMaterial: THREE.MeshLambertMaterial | null = null;
 	private treeLeafBlockMaterial: THREE.MeshLambertMaterial | null = null;
 	private smokeSpriteMaterial: THREE.SpriteMaterial | null = null;
-	private fireSpriteMaterial: THREE.SpriteMaterial | null = null;
 	private detailDirty = true;
 	private detailCenterQ = Number.NaN;
 	private detailCenterR = Number.NaN;
 	private lastDetailRebuildAt = -Infinity;
+	private readonly npcById = new Map<string, NpcInstance>();
 
 	private portals: PortalInstance[] = [];
 	private npcs: NpcInstance[] = [];
@@ -325,13 +328,12 @@ export class HexWorldGame implements DisposeBag {
 			}
 		};
 
-		const [grassCard, leafCard, smoke, fireFx] = await Promise.all([
+		const [grassCard, leafCard, smoke] = await Promise.all([
 			load('/textures/grass_card.png'),
 			load('/textures/leaf_card.png'),
-			load('/textures/smoke.png'),
-			load('/textures/fire_fx.png')
+			load('/textures/smoke.png')
 		]);
-		this.detailTextureRefs = { grassCard, leafCard, smoke, fireFx };
+		this.detailTextureRefs = { grassCard, leafCard, smoke };
 
 		this.grassCardMaterial = new THREE.MeshLambertMaterial({
 			map: grassCard ?? undefined,
@@ -359,14 +361,6 @@ export class HexWorldGame implements DisposeBag {
 			depthWrite: false,
 			depthTest: true
 		});
-		this.fireSpriteMaterial = new THREE.SpriteMaterial({
-			map: fireFx ?? undefined,
-			color: 0xffffff,
-			transparent: true,
-			opacity: 0.95,
-			blending: THREE.AdditiveBlending,
-			depthWrite: false
-		});
 	}
 
 	private disposeDetailAssets(): void {
@@ -378,10 +372,8 @@ export class HexWorldGame implements DisposeBag {
 		this.treeLeafBlockMaterial = null;
 		this.smokeSpriteMaterial?.dispose();
 		this.smokeSpriteMaterial = null;
-		this.fireSpriteMaterial?.dispose();
-		this.fireSpriteMaterial = null;
 		for (const tex of Object.values(this.detailTextureRefs)) tex?.dispose();
-		this.detailTextureRefs = { grassCard: null, leafCard: null, smoke: null, fireFx: null };
+		this.detailTextureRefs = { grassCard: null, leafCard: null, smoke: null };
 	}
 
 	private installGlobalHooks(): void {
@@ -852,6 +844,7 @@ export class HexWorldGame implements DisposeBag {
 
 	private tryTouchBreakAtCenter(): void {
 		this.audio.unlock();
+		if (this.tryHitNpcAtCenter()) return;
 		const hit = this.pickBlock();
 		if (!hit) return;
 		this.removeSelected(hit);
@@ -915,12 +908,12 @@ export class HexWorldGame implements DisposeBag {
 	private clearNpcs(): void {
 		for (const npc of this.npcs) this.npcGroup.remove(npc.group);
 		this.npcs = [];
+		this.npcById.clear();
 	}
 
 	private clearDetailDecor(): void {
 		for (const fx of this.fireFx) {
-			this.detailGroup.remove(fx.fire, fx.smoke);
-			(fx.fire.material as THREE.SpriteMaterial).dispose();
+			this.detailGroup.remove(fx.smoke);
 			(fx.smoke.material as THREE.SpriteMaterial).dispose();
 		}
 		this.fireFx = [];
@@ -1151,26 +1144,21 @@ export class HexWorldGame implements DisposeBag {
 
 	private rebuildFireFx(): void {
 		for (const fx of this.fireFx) {
-			this.detailGroup.remove(fx.fire, fx.smoke);
-			(fx.fire.material as THREE.SpriteMaterial).dispose();
+			this.detailGroup.remove(fx.smoke);
 			(fx.smoke.material as THREE.SpriteMaterial).dispose();
 		}
 		this.fireFx = [];
-		if (!this.fireSpriteMaterial || !this.smokeSpriteMaterial) return;
+		if (!this.smokeSpriteMaterial) return;
 
 		let count = 0;
 		for (const mesh of this.world.blocks.values()) {
 			const ud = mesh.userData as BlockUserData;
 			if (ud.typeKey !== 'fire') continue;
-			const fire = new THREE.Sprite(this.fireSpriteMaterial.clone());
 			const smoke = new THREE.Sprite(this.smokeSpriteMaterial.clone());
-			fire.position.set(mesh.position.x, mesh.position.y + 0.62, mesh.position.z);
-			fire.scale.set(0.95, 1.4, 1);
 			smoke.position.set(mesh.position.x, mesh.position.y + 1.1, mesh.position.z);
 			smoke.scale.set(0.7, 0.7, 1);
-			this.detailGroup.add(fire, smoke);
+			this.detailGroup.add(smoke);
 			this.fireFx.push({
-				fire,
 				smoke,
 				baseX: mesh.position.x,
 				baseY: mesh.position.y,
@@ -1185,12 +1173,6 @@ export class HexWorldGame implements DisposeBag {
 	private updateFireFx(nowMs: number): void {
 		for (const fx of this.fireFx) {
 			const t = nowMs * 0.001 + fx.phase;
-			const pulse = 0.85 + Math.sin(t * 6.2) * 0.16;
-			const fireMat = fx.fire.material as THREE.SpriteMaterial;
-			fireMat.opacity = 0.78 + Math.sin(t * 8.1) * 0.15;
-			fx.fire.position.set(fx.baseX, fx.baseY + 0.62 + Math.sin(t * 5.4) * 0.05, fx.baseZ);
-			fx.fire.scale.set(0.92 * pulse, 1.34 * pulse, 1);
-
 			const smokeMat = fx.smoke.material as THREE.SpriteMaterial;
 			const cycle = (t * 0.22) % 1;
 			smokeMat.opacity = Math.max(0, 0.42 * (1 - cycle));
@@ -1369,6 +1351,11 @@ export class HexWorldGame implements DisposeBag {
 				anchorR: anchor.r,
 				groundOffset,
 				idleUntilMs: 0,
+				health: kind === 'animal' ? 4 : 6,
+				fleeUntilMs: 0,
+				nextSoundAtMs: 0,
+				nextEnquireAtMs: performance.now() + 1800 + Math.random() * 2600,
+				mood: 'calm',
 				yawOffset: 0,
 				walkCycle: Math.random() * Math.PI * 2,
 				speed: kind === 'animal' ? 1.05 + Math.random() * 0.85 : 0.78 + Math.random() * 0.72,
@@ -1376,7 +1363,12 @@ export class HexWorldGame implements DisposeBag {
 				targetQ: s.q,
 				targetR: s.r
 			});
-			this.assignNpcTarget(this.npcs[this.npcs.length - 1]);
+			const npc = this.npcs[this.npcs.length - 1];
+			this.npcById.set(npc.id, npc);
+			npc.group.traverse((obj) => {
+				if (obj instanceof THREE.Mesh) obj.userData.npcId = npc.id;
+			});
+			this.assignNpcTarget(npc);
 		}
 	}
 
@@ -1468,10 +1460,59 @@ export class HexWorldGame implements DisposeBag {
 
 	private updateNpcs(dt: number, nowMs: number): void {
 		const playerAx = this.currentAxialUnderPlayer();
+		const playerX = this.cameraCtrl.yawObject.position.x;
+		const playerZ = this.cameraCtrl.yawObject.position.z;
+		const villagerEnquiries = [
+			'Villager: Greetings traveler. Do you come for the stones?',
+			'Villager: We gather at the circle at sunrise.',
+			'Villager: Keep to the paths and hearth fires.',
+			'Villager: Watch the rituals from the outer ring, please.'
+		];
+
 		for (const npc of this.npcs) {
 			const visible = hexDist(playerAx.q, playerAx.r, npc.q, npc.r) <= this.renderRadius;
 			npc.group.visible = visible;
 			if (!visible) continue;
+			const dxPlayer = playerX - npc.group.position.x;
+			const dzPlayer = playerZ - npc.group.position.z;
+			const distToPlayer = Math.hypot(dxPlayer, dzPlayer);
+
+			if (nowMs < npc.fleeUntilMs) {
+				npc.mood = 'fleeing';
+				if (distToPlayer < 4.2 && nowMs > npc.nextSoundAtMs) {
+					this.audio.playNpcVoice(npc.kind === 'animal' ? 'animal' : 'flee');
+					npc.nextSoundAtMs = nowMs + 1300 + Math.random() * 1600;
+				}
+				this.forceNpcFlee(npc, Math.max(0, npc.fleeUntilMs - nowMs));
+			} else if (npc.mood === 'fleeing') {
+				npc.mood = 'calm';
+			}
+
+			if (npc.kind === 'animal' && npc.mood !== 'fleeing' && distToPlayer < 3.9) {
+				this.forceNpcFlee(npc, 6500 + Math.random() * 2200);
+				if (nowMs > npc.nextSoundAtMs) {
+					this.audio.playNpcVoice('animal');
+					npc.nextSoundAtMs = nowMs + 1700 + Math.random() * 2000;
+				}
+			}
+
+			if (
+				npc.kind === 'villager' &&
+				npc.mood !== 'fleeing' &&
+				distToPlayer < 4.8 &&
+				nowMs > npc.nextEnquireAtMs
+			) {
+				npc.mood = 'curious';
+				npc.nextEnquireAtMs = nowMs + 9000 + Math.random() * 12000;
+				npc.targetQ = playerAx.q + (Math.floor(Math.random() * 3) - 1);
+				npc.targetR = playerAx.r + (Math.floor(Math.random() * 3) - 1);
+				if (nowMs > npc.nextSoundAtMs) {
+					this.audio.playNpcVoice('enquire');
+					npc.nextSoundAtMs = nowMs + 1500 + Math.random() * 1800;
+				}
+				const msg = villagerEnquiries[Math.floor(Math.random() * villagerEnquiries.length)] ?? villagerEnquiries[0];
+				if (nowMs - this.lastToastAt > 1600) this.showToast(msg, 1500);
+			}
 
 			if (npc.idleUntilMs > nowMs) {
 				const ax = worldToAxial(npc.group.position.x, npc.group.position.z);
@@ -1495,19 +1536,45 @@ export class HexWorldGame implements DisposeBag {
 							? 350 + Math.random() * 900
 							: 220 + Math.random() * 620;
 				npc.idleUntilMs = nowMs + pause;
+				if (npc.kind === 'animal' && nowMs > npc.nextSoundAtMs && Math.random() < 0.35) {
+					this.audio.playNpcVoice('animal');
+					npc.nextSoundAtMs = nowMs + 1800 + Math.random() * 2200;
+				}
 				this.assignNpcTarget(npc);
 				continue;
 			}
 
 			const step = Math.min(dist, npc.speed * dt);
-			const desiredYaw = Math.atan2(dx, dz) + npc.yawOffset;
+			let steerX = dx / Math.max(EPS, dist);
+			let steerZ = dz / Math.max(EPS, dist);
+			let repelX = 0;
+			let repelZ = 0;
+			for (const other of this.npcs) {
+				if (other.id === npc.id || !other.group.visible) continue;
+				const ox = npc.group.position.x - other.group.position.x;
+				const oz = npc.group.position.z - other.group.position.z;
+				const od = Math.hypot(ox, oz);
+				if (od < EPS || od > 1.7) continue;
+				const push = (1.7 - od) / 1.7;
+				repelX += (ox / od) * push;
+				repelZ += (oz / od) * push;
+			}
+			steerX += repelX * 0.42;
+			steerZ += repelZ * 0.42;
+			const steerLen = Math.hypot(steerX, steerZ);
+			if (steerLen > EPS) {
+				steerX /= steerLen;
+				steerZ /= steerLen;
+			}
+
+			const desiredYaw = Math.atan2(steerX, steerZ) + npc.yawOffset;
 			const yd = this.yawDelta(npc.group.rotation.y, desiredYaw);
 			npc.group.rotation.y += yd * Math.min(1, dt * 10.5);
 			const moveYaw = npc.group.rotation.y - npc.yawOffset;
 			const forwardX = Math.sin(moveYaw);
 			const forwardZ = Math.cos(moveYaw);
-			const along = Math.max(0, dx * forwardX + dz * forwardZ);
-			const move = Math.min(step, along);
+			const along = Math.max(0, steerX * forwardX + steerZ * forwardZ);
+			const move = step * along;
 			npc.group.position.x += forwardX * move;
 			npc.group.position.z += forwardZ * move;
 
@@ -1660,11 +1727,20 @@ export class HexWorldGame implements DisposeBag {
 			return;
 		}
 
-		const hit = this.pickBlock();
-		if (!hit) return;
+		const blockHit = this.pickBlock();
+		if (e.button === 0) {
+			const npcHit = this.pickNpc();
+			if (npcHit && (!blockHit || npcHit.distance <= blockHit.distance + 0.02)) {
+				this.hitNpc(npcHit.npc);
+				return;
+			}
+			if (!blockHit) return;
+			this.removeSelected(blockHit);
+			return;
+		}
 
-		if (e.button === 0) this.removeSelected(hit);
-		else this.placeAdjacent(hit, hit.worldNormal);
+		if (!blockHit) return;
+		this.placeAdjacent(blockHit, blockHit.worldNormal);
 	}
 
 	private removeSelected(hit: PickHit): void {
@@ -1732,6 +1808,61 @@ export class HexWorldGame implements DisposeBag {
 		this.tmpMat3.getNormalMatrix(first.object.matrixWorld);
 		first.worldNormal = first.face.normal.clone().applyMatrix3(this.tmpMat3).normalize();
 		return first;
+	}
+
+	private pickNpc(): NpcPickHit | null {
+		this.raycaster.setFromCamera(this.rayCenter, this.camera);
+		const hits = this.raycaster.intersectObjects(this.npcGroup.children, true);
+		if (!hits.length) return null;
+		for (const hit of hits) {
+			const npcId = (hit.object.userData as { npcId?: string }).npcId;
+			if (!npcId) continue;
+			const npc = this.npcById.get(npcId);
+			if (!npc) continue;
+			return { npc, distance: hit.distance };
+		}
+		return null;
+	}
+
+	private tryHitNpcAtCenter(): boolean {
+		const npcHit = this.pickNpc();
+		if (!npcHit) return false;
+		const blockHit = this.pickBlock();
+		if (blockHit && blockHit.distance < npcHit.distance - 0.02) return false;
+		this.hitNpc(npcHit.npc);
+		return true;
+	}
+
+	private forceNpcFlee(npc: NpcInstance, panicMs: number): void {
+		npc.mood = 'fleeing';
+		npc.fleeUntilMs = performance.now() + panicMs;
+		const playerAx = this.currentAxialUnderPlayer();
+		const awayQ = npc.q - playerAx.q;
+		const awayR = npc.r - playerAx.r;
+		const s = awayQ === 0 && awayR === 0 ? 1 : 5;
+		const targetQ = npc.q + Math.sign(awayQ || 1) * s;
+		const targetR = npc.r + Math.sign(awayR || 1) * s;
+		npc.targetQ = targetQ;
+		npc.targetR = targetR;
+		npc.idleUntilMs = 0;
+	}
+
+	private hitNpc(npc: NpcInstance): void {
+		npc.health -= 2;
+		npc.mood = 'aggressive';
+		this.audio.playNpcVoice('hurt');
+		if (npc.health <= 0) {
+			this.audio.playNpcVoice('death');
+			this.showToast(npc.kind === 'animal' ? 'Animal defeated.' : 'Villager defeated.', 900);
+			this.npcGroup.remove(npc.group);
+			this.npcs = this.npcs.filter((n) => n.id !== npc.id);
+			this.npcById.delete(npc.id);
+			return;
+		}
+		this.forceNpcFlee(npc, npc.kind === 'animal' ? 9000 : 7000);
+		this.audio.playNpcVoice('flee');
+		const bark = npc.kind === 'animal' ? 'Animal startled and ran away.' : 'Villager: Hey! Why did you hit me?';
+		this.showToast(bark, 1300);
 	}
 
 	private invalidateHighlightCache(): void {
@@ -2175,11 +2306,11 @@ export class HexWorldGame implements DisposeBag {
 		const a = (angleDeg * Math.PI) / 180;
 		const cx = Math.cos(a) * this.inspect.distance;
 		const cz = Math.sin(a) * this.inspect.distance;
-		const cy = this.inspect.height;
-		this.cameraCtrl.setFeetPosition(cx, cy, cz);
+		const eyeY = this.inspect.height;
+		this.cameraCtrl.setFeetPosition(cx, eyeY - PLAYER_EYE_HEIGHT, cz);
 
 		const tx = 0;
-		const ty = 0.5 * BLOCK_H + 1.62;
+		const ty = this.inspect.type === 'fire' ? 0.76 * BLOCK_H : 0.5 * BLOCK_H;
 		const tz = 0;
 		const target = new THREE.Vector3(tx, ty, tz);
 		this.cameraCtrl.lookAt(target);

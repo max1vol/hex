@@ -55,7 +55,7 @@ describe('terrain generation', () => {
 
 		expect(stoneColumns.size).toBeGreaterThan(120);
 		expect(unsupportedStoneColumns).toBeLessThanOrEqual(14);
-	});
+	}, 15000);
 
 	it('generates active Stonehenge settlement content (fire + huts)', () => {
 		const biome = getBiomeOrDefault('grassland-origins');

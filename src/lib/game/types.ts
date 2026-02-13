@@ -212,6 +212,11 @@ export interface NpcInstance {
 	anchorR: number;
 	groundOffset: number;
 	idleUntilMs: number;
+	health: number;
+	fleeUntilMs: number;
+	nextSoundAtMs: number;
+	nextEnquireAtMs: number;
+	mood: 'calm' | 'curious' | 'fleeing' | 'aggressive';
 	yawOffset: number;
 	walkCycle: number;
 	speed: number;
