@@ -58,7 +58,6 @@ interface NpcAnchorPoint {
 }
 
 interface FireFxInstance {
-	fire: THREE.Sprite;
 	smoke: THREE.Sprite;
 	baseX: number;
 	baseY: number;
@@ -134,18 +133,15 @@ export class HexWorldGame implements DisposeBag {
 		grassCard: THREE.Texture | null;
 		leafCard: THREE.Texture | null;
 		smoke: THREE.Texture | null;
-		fireFx: THREE.Texture | null;
 	} = {
 		grassCard: null,
 		leafCard: null,
 		smoke: null,
-		fireFx: null
 	};
 	private grassCardMaterial: THREE.MeshLambertMaterial | null = null;
 	private leafCardMaterial: THREE.MeshLambertMaterial | null = null;
 	private treeLeafBlockMaterial: THREE.MeshLambertMaterial | null = null;
 	private smokeSpriteMaterial: THREE.SpriteMaterial | null = null;
-	private fireSpriteMaterial: THREE.SpriteMaterial | null = null;
 	private detailDirty = true;
 	private detailCenterQ = Number.NaN;
 	private detailCenterR = Number.NaN;
@@ -335,13 +331,12 @@ export class HexWorldGame implements DisposeBag {
 			}
 		};
 
-		const [grassCard, leafCard, smoke, fireFx] = await Promise.all([
+		const [grassCard, leafCard, smoke] = await Promise.all([
 			load('/textures/grass_card.png'),
 			load('/textures/leaf_card.png'),
-			load('/textures/smoke.png'),
-			load('/textures/fire_fx.png')
+			load('/textures/smoke.png')
 		]);
-		this.detailTextureRefs = { grassCard, leafCard, smoke, fireFx };
+		this.detailTextureRefs = { grassCard, leafCard, smoke };
 
 		this.grassCardMaterial = new THREE.MeshLambertMaterial({
 			map: grassCard ?? undefined,
@@ -369,15 +364,6 @@ export class HexWorldGame implements DisposeBag {
 			depthWrite: false,
 			depthTest: true
 		});
-		this.fireSpriteMaterial = new THREE.SpriteMaterial({
-			map: fireFx ?? undefined,
-			color: 0xffffff,
-			transparent: true,
-			opacity: 0.95,
-			blending: THREE.AdditiveBlending,
-			depthWrite: false,
-			depthTest: true
-		});
 	}
 
 	private disposeDetailAssets(): void {
@@ -389,10 +375,8 @@ export class HexWorldGame implements DisposeBag {
 		this.treeLeafBlockMaterial = null;
 		this.smokeSpriteMaterial?.dispose();
 		this.smokeSpriteMaterial = null;
-		this.fireSpriteMaterial?.dispose();
-		this.fireSpriteMaterial = null;
 		for (const tex of Object.values(this.detailTextureRefs)) tex?.dispose();
-		this.detailTextureRefs = { grassCard: null, leafCard: null, smoke: null, fireFx: null };
+		this.detailTextureRefs = { grassCard: null, leafCard: null, smoke: null };
 	}
 
 	private installGlobalHooks(): void {
@@ -933,8 +917,7 @@ export class HexWorldGame implements DisposeBag {
 
 	private clearDetailDecor(): void {
 		for (const fx of this.fireFx) {
-			this.detailGroup.remove(fx.fire, fx.smoke);
-			(fx.fire.material as THREE.SpriteMaterial).dispose();
+			this.detailGroup.remove(fx.smoke);
 			(fx.smoke.material as THREE.SpriteMaterial).dispose();
 		}
 		this.fireFx = [];
@@ -1165,26 +1148,21 @@ export class HexWorldGame implements DisposeBag {
 
 	private rebuildFireFx(): void {
 		for (const fx of this.fireFx) {
-			this.detailGroup.remove(fx.fire, fx.smoke);
-			(fx.fire.material as THREE.SpriteMaterial).dispose();
+			this.detailGroup.remove(fx.smoke);
 			(fx.smoke.material as THREE.SpriteMaterial).dispose();
 		}
 		this.fireFx = [];
-		if (!this.fireSpriteMaterial || !this.smokeSpriteMaterial) return;
+		if (!this.smokeSpriteMaterial) return;
 
 		let count = 0;
 		for (const mesh of this.world.blocks.values()) {
 			const ud = mesh.userData as BlockUserData;
 			if (ud.typeKey !== 'fire') continue;
-			const fire = new THREE.Sprite(this.fireSpriteMaterial.clone());
 			const smoke = new THREE.Sprite(this.smokeSpriteMaterial.clone());
-			fire.position.set(mesh.position.x, mesh.position.y + 0.62, mesh.position.z);
-			fire.scale.set(0.95, 1.4, 1);
 			smoke.position.set(mesh.position.x, mesh.position.y + 1.1, mesh.position.z);
 			smoke.scale.set(0.7, 0.7, 1);
-			this.detailGroup.add(fire, smoke);
+			this.detailGroup.add(smoke);
 			this.fireFx.push({
-				fire,
 				smoke,
 				baseX: mesh.position.x,
 				baseY: mesh.position.y,
@@ -1199,12 +1177,6 @@ export class HexWorldGame implements DisposeBag {
 	private updateFireFx(nowMs: number): void {
 		for (const fx of this.fireFx) {
 			const t = nowMs * 0.001 + fx.phase;
-			const pulse = 0.85 + Math.sin(t * 6.2) * 0.16;
-			const fireMat = fx.fire.material as THREE.SpriteMaterial;
-			fireMat.opacity = 0.78 + Math.sin(t * 8.1) * 0.15;
-			fx.fire.position.set(fx.baseX, fx.baseY + 0.62 + Math.sin(t * 5.4) * 0.05, fx.baseZ);
-			fx.fire.scale.set(0.92 * pulse, 1.34 * pulse, 1);
-
 			const smokeMat = fx.smoke.material as THREE.SpriteMaterial;
 			const cycle = (t * 0.22) % 1;
 			smokeMat.opacity = Math.max(0, 0.42 * (1 - cycle));
